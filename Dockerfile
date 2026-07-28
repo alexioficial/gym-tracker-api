@@ -21,10 +21,11 @@ COPY --from=build --chown=app:app /app/target/release/gym-tracker-api /usr/local
 
 # Coolify can override HOST/PORT. RUST_ENV enables the API's strict production
 # configuration checks (HTTPS frontend origin and explicit secrets).
+# The healthcheck intentionally lives in Coolify's UI, not here: that lets its
+# startup grace period be tuned for database/index initialization.
 ENV RUST_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD curl --fail --silent http://127.0.0.1:${PORT}/health || exit 1
 USER app
 CMD ["gym-tracker-api"]
