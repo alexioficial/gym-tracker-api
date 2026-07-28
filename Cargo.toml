@@ -1,0 +1,21 @@
+[package]
+name = "gym-tracker-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-cors = "0.7.1"
+actix-web = { version = "4.11.0", features = ["cookies", "macros"] }
+argon2 = "0.5.3"
+chrono = { version = "0.4.41", features = ["serde"] }
+dotenvy = "0.15.7"
+futures = "0.3.31"
+hex = "0.4.3"
+mongodb = "3.2.5"
+password-hash = "0.5.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+scrypt = "0.11.0"
+thiserror = "2.0.12"
+subtle = "2.6.1"
+uuid = { version = "1.16.0", features = ["v4"] }
