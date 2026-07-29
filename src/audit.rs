@@ -188,7 +188,16 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
     }
     request.set_payload(raw_body.clone().into());
 
-    let info = request.connection_info();
+    // `connection_info` holds an internal request borrow. Copy the values before
+    // calling `cookies`, which needs a mutable borrow to parse/cache cookies.
+    let (scheme, host, reported_client_ip) = {
+        let info = request.connection_info();
+        (
+            info.scheme().to_owned(),
+            info.host().to_owned(),
+            info.realip_remote_addr().map(str::to_owned),
+        )
+    };
     let headers = capture_headers(request.headers().iter());
     let cookies = request
         .cookies()
@@ -227,10 +236,10 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
         query,
         uri: request.uri().to_string(),
         version: format!("{:?}", request.version()),
-        scheme: info.scheme().to_owned(),
-        host: info.host().to_owned(),
+        scheme,
+        host,
         peer_ip: request.peer_addr().map(|address| address.ip().to_string()),
-        reported_client_ip: info.realip_remote_addr().map(str::to_owned),
+        reported_client_ip,
         client_kind: client_kind.to_owned(),
         headers,
         cookies,
