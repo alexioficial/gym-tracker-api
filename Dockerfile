@@ -3,10 +3,11 @@
 FROM rust:1.88-bookworm AS build
 WORKDIR /app
 
-# Cache dependencies separately from application code.
+# Compile the real source in the same layer as it is copied.  A previous
+# placeholder-main cache strategy could leave Cargo believing the placeholder
+# binary was newer than source files whose timestamps were preserved by COPY.
+# That produced an image which exited successfully without starting the API.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --locked --release
-RUN rm -rf src
 COPY src ./src
 RUN cargo build --locked --release
 
