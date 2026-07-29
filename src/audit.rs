@@ -220,7 +220,17 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     let has_origin = request.headers().contains_key("origin");
-    let client_kind = if user_agent.contains("Dart") || user_agent.contains("Flutter") {
+    // Server-side rendered web requests do not retain the browser's Origin or
+    // user agent, so the official clients identify themselves explicitly.
+    let declared_client = request
+        .headers()
+        .get("x-gym-client")
+        .and_then(|value| value.to_str().ok());
+    let client_kind = if declared_client == Some("mobile-app") {
+        "mobile-app"
+    } else if declared_client == Some("web") {
+        "web"
+    } else if user_agent.contains("Dart") || user_agent.contains("Flutter") {
         "mobile-app"
     } else if has_origin {
         "web"

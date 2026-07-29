@@ -39,7 +39,11 @@ async fn main() -> std::io::Result<()> {
         let cors = Cors::default()
             .allowed_origin(&config.frontend_origin)
             .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
-            .allowed_headers(vec![header::CONTENT_TYPE, header::ORIGIN])
+            .allowed_headers(vec![
+                header::CONTENT_TYPE,
+                header::ORIGIN,
+                header::HeaderName::from_static("x-gym-client"),
+            ])
             .supports_credentials()
             .max_age(3600);
         App::new()
