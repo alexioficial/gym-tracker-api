@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::audit::AuditCipher;
+
 #[derive(Clone)]
 pub struct Config {
     pub mongodb_uri: String,
@@ -8,6 +10,7 @@ pub struct Config {
     pub admin_password: String,
     pub frontend_origin: String,
     pub session_cookie_secure: bool,
+    pub audit_cipher: AuditCipher,
 }
 
 impl Config {
@@ -16,6 +19,7 @@ impl Config {
             || matches!(env::var("NODE_ENV").as_deref(), Ok("production"));
         let mongodb_uri = required("MONGODB_URI", is_production)?;
         let admin_password = required("ADMIN_PASSWORD", is_production)?;
+        let audit_key = required("AUDIT_LOG_ENCRYPTION_KEY", is_production)?;
         let frontend_origin = env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://localhost:5173".to_owned())
             .trim_end_matches('/')
@@ -38,6 +42,7 @@ impl Config {
                 || env::var("SESSION_COOKIE_SECURE")
                     .map(|value| value.eq_ignore_ascii_case("true"))
                     .unwrap_or(false),
+            audit_cipher: AuditCipher::from_base64(&audit_key)?,
         })
     }
 }

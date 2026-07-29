@@ -41,6 +41,26 @@ async fn ensure_indexes(db: &Database) -> Result<(), ApiError> {
                 .build(),
         )
         .await?;
+    // The TTL monitor removes audit entries once their 30-day retention window ends.
+    db.collection::<mongodb::bson::Document>("audit_logs")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "expiresAt": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .expire_after(Some(std::time::Duration::from_secs(0)))
+                        .build(),
+                )
+                .build(),
+        )
+        .await?;
+    db.collection::<mongodb::bson::Document>("audit_logs")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "createdAt": -1, "methodIndex": 1, "pathIndex": 1, "statusIndex": 1, "clientIndex": 1 })
+                .build(),
+        )
+        .await?;
     db.collection::<mongodb::bson::Document>("auth_sessions")
         .create_index(IndexModel::builder().keys(doc! { "userId": 1 }).build())
         .await?;

@@ -1,4 +1,5 @@
 mod admin;
+mod audit;
 mod auth;
 mod exercises;
 mod routines;
@@ -12,5 +13,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .configure(exercises::configure)
         .configure(routines::configure)
         .configure(sessions::configure)
-        .configure(admin::configure);
+        .configure(admin::configure)
+        .configure(audit::configure);
 }

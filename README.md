@@ -21,7 +21,7 @@ API Rust para `gym-tracker`, implementada con Actix Web y MongoDB.
 
 ## Variables de entorno
 
-Parte de `.env.example`. En producción son obligatorias `MONGODB_URI`, `ADMIN_PASSWORD` y una `FRONTEND_ORIGIN` HTTPS; use `RUST_ENV=production` (o `NODE_ENV=production`).
+Parte de `.env.example`. En producción son obligatorias `MONGODB_URI`, `ADMIN_PASSWORD`, `AUDIT_LOG_ENCRYPTION_KEY` y una `FRONTEND_ORIGIN` HTTPS; use `RUST_ENV=production` (o `NODE_ENV=production`).
 
 ## Desarrollo
 
@@ -44,7 +44,14 @@ En las variables de entorno de Coolify define:
 | `MONGODB_DB` | Opcional; por defecto `gym_tracker`. |
 | `ADMIN_USERNAME` | Opcional; por defecto `alexioficial`. |
 | `ADMIN_PASSWORD` | Contraseña inicial/autoritaria del administrador; obligatoria. |
+| `AUDIT_LOG_ENCRYPTION_KEY` | Clave nueva, secreta y estable: Base64 de exactamente 32 bytes aleatorios (`openssl rand -base64 32`). Si se pierde, los registros existentes no se podrán leer. |
 | `FRONTEND_ORIGIN` | URL HTTPS pública exacta de `gym-tracker`, por ejemplo `https://gym.example.com`. |
 | `PORT` | `8080` (o el puerto interno seleccionado en Coolify). |
 
 No configures `SESSION_COOKIE_SECURE=false` en producción: la API lo fuerza a seguro. En el frontend configura `API_URL` con la URL interna que Coolify expone para este servicio, y conserva `ORIGIN` como su URL pública HTTPS.
+
+## Auditoría cifrada de requests
+
+Cada petición que llega a la API, incluido `/health`, se guarda en `audit_logs`. Solo se conservan en claro los metadatos técnicos necesarios para la expiración automática y los índices HMAC no reversibles de los filtros. La petición completa —cabeceras, cookies, cuerpo, IPs y metadatos de conexión— y la respuesta se cifran con **AES-256-GCM**.
+
+MongoDB elimina automáticamente cada registro al cumplir 30 días mediante un índice TTL. La clave `AUDIT_LOG_ENCRYPTION_KEY` no se guarda en la base de datos: respáldala de forma segura, porque si se pierde o se cambia sin una migración, los registros ya cifrados no podrán recuperarse. El administrador consulta y descifra los registros desde `/admin/audit` en la aplicación web.

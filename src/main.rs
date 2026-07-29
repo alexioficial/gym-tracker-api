@@ -1,4 +1,5 @@
 mod app;
+mod audit;
 mod auth;
 mod config;
 mod db;
@@ -8,7 +9,7 @@ mod routes;
 mod validation;
 
 use actix_cors::Cors;
-use actix_web::{App, HttpServer, http::header, web};
+use actix_web::{App, HttpServer, http::header, middleware, web};
 use app::AppState;
 use config::Config;
 
@@ -44,6 +45,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(state.clone())
             .wrap(cors)
+            .wrap(middleware::from_fn(audit::log_request))
             .configure(app::configure)
     })
     .bind((host, port))?
