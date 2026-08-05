@@ -18,6 +18,7 @@ API Rust para `gym-tracker`, implementada con Actix Web y MongoDB.
 - Validación en el servidor de IDs, relaciones de pertenencia, fechas, pesos/repeticiones, tamaños de payload y límites de colecciones.
 - Protección CSRF para todas las solicitudes que modifican estado: exige `Origin` igual a `FRONTEND_ORIGIN`. El frontend SvelteKit lo envía en sus llamadas servidor-a-servidor.
 - Índices de MongoDB y limpieza de datos/sesiones al eliminar una cuenta.
+- Sincronización offline mediante `GET/POST /api/sync`: cada mutación lleva un UUID generado por el dispositivo y se registra una sola vez por usuario, por lo que reintentos tras perder la red no duplican sesiones, rutinas ni ejercicios.
 
 ## Variables de entorno
 

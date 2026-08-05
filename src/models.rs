@@ -321,3 +321,59 @@ pub struct SessionInput {
     #[serde(default)]
     pub entries: Vec<SessionEntryInput>,
 }
+
+/// A client-originated operation kept locally while the device is offline.
+/// The id is generated on the device and makes retries safe.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncMutationInput {
+    pub mutation_id: String,
+    pub entity: String,
+    pub operation: String,
+    pub entity_id: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncMutationResult {
+    pub mutation_id: String,
+    pub entity: String,
+    pub operation: String,
+    pub entity_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SyncMutationDoc {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    #[serde(rename = "userId")]
+    pub user_id: ObjectId,
+    #[serde(rename = "mutationId")]
+    pub mutation_id: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime,
+    pub result: SyncMutationResult,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncRequest {
+    #[serde(default)]
+    pub mutations: Vec<SyncMutationInput>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSnapshot {
+    pub exercises: Vec<ExerciseOut>,
+    pub routines: Vec<RoutineOut>,
+    pub sessions: Vec<SessionOut>,
+    pub schedule: ScheduleDays,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResponse {
+    pub snapshot: SyncSnapshot,
+    pub applied: Vec<SyncMutationResult>,
+}

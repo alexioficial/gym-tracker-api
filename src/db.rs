@@ -95,6 +95,11 @@ async fn ensure_indexes(db: &Database) -> Result<(), ApiError> {
     db.collection::<mongodb::bson::Document>("schedule")
         .create_index(unique(doc! { "userId": 1 }))
         .await?;
+    // A device can safely retry an offline mutation after a network failure.
+    // One mutation id may only be applied once per user.
+    db.collection::<mongodb::bson::Document>("sync_mutations")
+        .create_index(unique(doc! { "userId": 1, "mutationId": 1 }))
+        .await?;
     Ok(())
 }
 

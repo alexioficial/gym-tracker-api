@@ -43,7 +43,7 @@ async fn list(
     ))
 }
 
-async fn owned_exercises(
+pub(crate) async fn owned_exercises(
     db: &Database,
     user_id: ObjectId,
     entries: &[RoutineExerciseInput],
@@ -87,7 +87,7 @@ async fn owned_exercises(
     Ok(exercises)
 }
 
-fn valid_color(color: &str) -> bool {
+pub(crate) fn valid_color(color: &str) -> bool {
     ROUTINE_COLORS.contains(&color)
 }
 
@@ -201,7 +201,10 @@ async fn get_schedule(
     Ok(web::Json(days))
 }
 
-fn day_slot<'a>(days: &'a mut ScheduleDays, day: &str) -> Result<&'a mut Option<String>, ApiError> {
+pub(crate) fn day_slot<'a>(
+    days: &'a mut ScheduleDays,
+    day: &str,
+) -> Result<&'a mut Option<String>, ApiError> {
     match day {
         "mon" => Ok(&mut days.mon),
         "tue" => Ok(&mut days.tue),
