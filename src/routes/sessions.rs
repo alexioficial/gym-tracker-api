@@ -45,7 +45,7 @@ async fn list(
     ))
 }
 
-async fn data(
+pub(crate) async fn session_data(
     db: &Database,
     user_id: ObjectId,
     input: &SessionInput,
@@ -141,7 +141,7 @@ async fn create(
 ) -> Result<web::Json<SessionOut>, ApiError> {
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
-    let (routine_id, notes, entries) = data(&state.db, current.id, &input).await?;
+    let (routine_id, notes, entries) = session_data(&state.db, current.id, &input).await?;
     let session = SessionDoc {
         id: ObjectId::new(),
         user_id: current.id,
@@ -182,7 +182,7 @@ async fn update(
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
-    let (routine_id, notes, entries) = data(&state.db, current.id, &input).await?;
+    let (routine_id, notes, entries) = session_data(&state.db, current.id, &input).await?;
     let result = state.db.collection::<SessionDoc>("sessions").update_one(doc! { "_id": object_id(&path)?, "userId": current.id }, doc! { "$set": { "date": &input.date, "routineId": routine_id, "notes": notes, "entries": to_bson(&entries).map_err(|_| ApiError::Crypto)? } }).await?;
     if result.matched_count == 0 {
         return Err(ApiError::NotFound);
