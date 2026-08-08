@@ -36,7 +36,7 @@ async fn list(
         .db
         .collection::<SessionDoc>("sessions")
         .find(doc! { "userId": current.id })
-        .sort(doc! { "date": -1 })
+        .sort(doc! { "date": -1, "createdAt": -1, "_id": -1 })
         .await?
         .try_collect::<Vec<_>>()
         .await?;

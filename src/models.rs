@@ -222,6 +222,7 @@ pub struct SessionEntryOut {
 pub struct SessionOut {
     pub id: String,
     pub date: String,
+    pub created_at: i64,
     pub routine_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -233,6 +234,7 @@ impl From<SessionDoc> for SessionOut {
         Self {
             id: value.id.to_hex(),
             date: value.date,
+            created_at: value.created_at.timestamp_millis(),
             routine_id: value.routine_id.map(|id| id.to_hex()),
             notes: value.notes,
             entries: value

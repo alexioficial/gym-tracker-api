@@ -86,7 +86,7 @@ async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiE
     let sessions = db
         .collection::<SessionDoc>("sessions")
         .find(doc! { "userId": user_id })
-        .sort(doc! { "date": -1 })
+        .sort(doc! { "date": -1, "createdAt": -1, "_id": -1 })
         .await?
         .try_collect::<Vec<_>>()
         .await?
