@@ -8,17 +8,16 @@ COPY src ./src
 
 # Keep downloaded crates and compiled dependencies between BuildKit builds.
 # Source changes still force this step to run, but Cargo recompiles only this
-# application instead of the complete dependency graph. Touching both entry
-# points also guarantees that a cached target can never leave a stale binary.
+# application instead of the complete dependency graph. Touching the entry
+# point also guarantees that a cached target can never leave a stale binary.
 # The finished executables are copied out because cache-mount contents are not
 # part of the resulting image layer.
 RUN --mount=type=cache,id=gym-tracker-api-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
 	--mount=type=cache,id=gym-tracker-api-cargo-git,target=/usr/local/cargo/git,sharing=locked \
 	--mount=type=cache,id=gym-tracker-api-target,target=/app/target,sharing=locked \
-	touch src/main.rs src/bin/clone-user-data.rs \
-	&& cargo build --locked --release --bins \
-	&& install -Dm755 target/release/gym-tracker-api /out/gym-tracker-api \
-	&& install -Dm755 target/release/clone-user-data /out/clone-user-data
+	touch src/main.rs \
+	&& cargo build --locked --release --bin gym-tracker-api \
+	&& install -Dm755 target/release/gym-tracker-api /out/gym-tracker-api
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -28,7 +27,6 @@ RUN apt-get update \
 	&& useradd --system --gid app --create-home --home-dir /app app
 WORKDIR /app
 COPY --from=build --chown=app:app /out/gym-tracker-api /usr/local/bin/gym-tracker-api
-COPY --from=build --chown=app:app /out/clone-user-data /usr/local/bin/gym-tracker-clone-user
 
 # Coolify can override HOST/PORT. RUST_ENV enables the API's strict production
 # configuration checks (HTTPS frontend origin and explicit secrets).

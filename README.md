@@ -60,26 +60,6 @@ En las variables de entorno de Coolify define:
 
 No configures `SESSION_COOKIE_SECURE=false` en producción: la API lo fuerza a seguro. En el frontend configura `API_URL` con la URL interna que Coolify expone para este servicio, y conserva `ORIGIN` como su URL pública HTTPS.
 
-## Utilidad temporal para clonar datos de un usuario
-
-La imagen incluye el comando manual `gym-tracker-clone-user`. Copia ejercicios,
-rutinas y horario generando IDs nuevos y remapeando sus relaciones. No copia
-progreso (`sessions`), credenciales, rol, sesiones de autenticación, auditoría ni
-mutaciones offline. Por seguridad, se niega a ejecutarse si el usuario destino ya
-tiene progreso y restaura sus datos anteriores si el reemplazo falla.
-
-Desde la terminal del contenedor en Coolify:
-
-```bash
-gym-tracker-clone-user --source alexioficial --target juliux --confirm
-```
-
-El usuario destino debe existir previamente. El comando es reejecutable: cada
-ejecución reemplaza solamente sus ejercicios, rutinas y horario por una copia
-nueva de los datos actuales del origen. Después de usarlo y verificar el resultado,
-se puede eliminar `src/bin/clone-user-data.rs`, su `COPY` del Dockerfile y esta
-sección.
-
 ## Auditoría cifrada de requests
 
 Cada petición que llega a la API, incluido `/health`, se guarda en `audit_logs`. Solo se conservan en claro los metadatos técnicos necesarios para la expiración automática y los índices HMAC no reversibles de los filtros. La petición completa —cabeceras, cookies, cuerpo, IPs y metadatos de conexión— y la respuesta se cifran con **AES-256-GCM**.
