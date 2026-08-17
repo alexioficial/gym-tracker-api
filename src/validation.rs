@@ -11,8 +11,9 @@ pub const MAX_SESSION_ENTRIES: usize = 50;
 pub const MAX_WEIGHT: f64 = 5_000.0;
 pub const MUSCLE_GROUP_MAX: usize = 80;
 pub const NOTES_MAX: usize = 2_000;
-pub const ROUTINE_COLORS: [&str; 8] = [
-    "#EAB308", "#F97316", "#EF4444", "#22C55E", "#3B82F6", "#A855F7", "#EC4899", "#14B8A6",
+pub const ROUTINE_COLORS: [&str; 16] = [
+    "#EAB308", "#F59E0B", "#F97316", "#EF4444", "#F43F5E", "#EC4899", "#A855F7", "#8B5CF6",
+    "#6366F1", "#3B82F6", "#0EA5E9", "#06B6D4", "#14B8A6", "#10B981", "#22C55E", "#84CC16",
 ];
 pub const ROUTINE_MAX: usize = 100;
 const USERNAME_MAX: usize = 30;
@@ -63,8 +64,24 @@ pub fn round(value: f64, decimals: i32) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_date;
+    use std::collections::HashSet;
+
+    use super::{ROUTINE_COLORS, valid_date};
     use crate::auth::password_is_valid;
+
+    #[test]
+    fn routine_palette_has_two_unique_rows_of_eight_hex_colors() {
+        assert_eq!(ROUTINE_COLORS.len(), 16);
+        assert_eq!(
+            ROUTINE_COLORS.iter().copied().collect::<HashSet<_>>().len(),
+            ROUTINE_COLORS.len()
+        );
+        assert!(ROUTINE_COLORS.iter().all(|color| {
+            color.len() == 7
+                && color.starts_with('#')
+                && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        }));
+    }
 
     #[test]
     fn accepts_only_real_dates_in_the_supported_range() {
