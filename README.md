@@ -39,6 +39,12 @@ Por defecto escucha en `http://localhost:8080`. El frontend debe configurar `API
 
 El repositorio incluye un `Dockerfile` de producción para Coolify. Crea una aplicación Dockerfile apuntando a este proyecto (o usa `gym-tracker-api` como directorio base si ambos proyectos están en un monorepo) y configura el puerto interno **8080**. La imagen ejecuta como usuario sin privilegios, usa `RUST_ENV=production` y publica `GET /health` para health checks.
 
+El Dockerfile usa cachés persistentes de BuildKit para el registro de Cargo y
+los artefactos compilados. El primer build después de crear o purgar esas cachés
+seguirá compilando todas las dependencias; los despliegues siguientes normalmente
+solo recompilan la aplicación. Mantén desactivada la opción **Disable Build
+Cache** de Coolify salvo que estés diagnosticando una caché dañada.
+
 En las variables de entorno de Coolify define:
 
 | Variable | Valor de producción |
