@@ -10,6 +10,7 @@ pub struct Config {
     pub admin_password: String,
     pub frontend_origin: String,
     pub session_cookie_secure: bool,
+    pub trust_proxy_headers: bool,
     pub audit_cipher: AuditCipher,
 }
 
@@ -42,6 +43,9 @@ impl Config {
                 || env::var("SESSION_COOKIE_SECURE")
                     .map(|value| value.eq_ignore_ascii_case("true"))
                     .unwrap_or(false),
+            trust_proxy_headers: env::var("TRUST_PROXY_HEADERS")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             audit_cipher: AuditCipher::from_base64(&audit_key)?,
         })
     }

@@ -5,6 +5,7 @@ mod config;
 mod db;
 mod error;
 mod models;
+mod rate_limit;
 mod routes;
 mod validation;
 
@@ -32,6 +33,7 @@ async fn main() -> std::io::Result<()> {
     let state = web::Data::new(AppState {
         db: database,
         config: config.clone(),
+        rate_limits: rate_limit::RateLimiters::new(),
     });
 
     eprintln!("gym-tracker-api: listening on http://{host}:{port}");
@@ -48,8 +50,11 @@ async fn main() -> std::io::Result<()> {
             .max_age(3600);
         App::new()
             .app_data(state.clone())
-            .wrap(cors)
+            // Actix executes wrappers in reverse registration order. Keep audit
+            // outside the limiter so rejected requests are recorded as well.
+            .wrap(middleware::from_fn(rate_limit::enforce))
             .wrap(middleware::from_fn(audit::log_request))
+            .wrap(cors)
             .configure(app::configure)
     })
     .bind((host, port))?

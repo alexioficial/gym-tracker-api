@@ -9,7 +9,7 @@ WORKDIR /app
 # That produced an image which exited successfully without starting the API.
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --locked --release
+RUN cargo build --locked --release --bins
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -19,6 +19,7 @@ RUN apt-get update \
 	&& useradd --system --gid app --create-home --home-dir /app app
 WORKDIR /app
 COPY --from=build --chown=app:app /app/target/release/gym-tracker-api /usr/local/bin/gym-tracker-api
+COPY --from=build --chown=app:app /app/target/release/clone-user-data /usr/local/bin/gym-tracker-clone-user
 
 # Coolify can override HOST/PORT. RUST_ENV enables the API's strict production
 # configuration checks (HTTPS frontend origin and explicit secrets).
@@ -27,6 +28,9 @@ COPY --from=build --chown=app:app /app/target/release/gym-tracker-api /usr/local
 ENV RUST_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
+# Coolify/Cloudflare provide the original client IP through proxy headers.
+# Keep the origin firewalled so clients cannot inject these headers directly.
+ENV TRUST_PROXY_HEADERS=true
 EXPOSE 8080
 USER app
 CMD ["/usr/local/bin/gym-tracker-api"]

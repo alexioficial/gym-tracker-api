@@ -20,6 +20,8 @@ API Rust para `gym-tracker`, implementada con Actix Web y MongoDB.
 - Índices de MongoDB y limpieza de datos/sesiones al eliminar una cuenta.
 - Sincronización offline mediante `GET/POST /api/sync`: cada mutación lleva un UUID generado por el dispositivo y se registra una sola vez por usuario, por lo que reintentos tras perder la red no duplican sesiones, rutinas ni ejercicios.
 
+- Rate limiting: 120 solicitudes por minuto por cliente, 5 intentos de login por minuto por cliente/usuario y un límite de seguridad de 6,000 solicitudes por minuto por instancia, con respuestas `429` y `Retry-After`.
+
 ## Variables de entorno
 
 Parte de `.env.example`. En producción son obligatorias `MONGODB_URI`, `ADMIN_PASSWORD`, `AUDIT_LOG_ENCRYPTION_KEY` y una `FRONTEND_ORIGIN` HTTPS; use `RUST_ENV=production` (o `NODE_ENV=production`).
@@ -47,9 +49,30 @@ En las variables de entorno de Coolify define:
 | `ADMIN_PASSWORD` | Contraseña inicial/autoritaria del administrador; obligatoria. |
 | `AUDIT_LOG_ENCRYPTION_KEY` | Clave nueva, secreta y estable: Base64 de exactamente 32 bytes aleatorios (`openssl rand -base64 32`). Si se pierde, los registros existentes no se podrán leer. |
 | `FRONTEND_ORIGIN` | URL HTTPS pública exacta de `gym-tracker`, por ejemplo `https://gym.example.com`. |
+| `TRUST_PROXY_HEADERS` | `true` solo detrás de Coolify/Cloudflare y con el origen bloqueado contra conexiones directas. El Dockerfile ya lo activa. |
 | `PORT` | `8080` (o el puerto interno seleccionado en Coolify). |
 
 No configures `SESSION_COOKIE_SECURE=false` en producción: la API lo fuerza a seguro. En el frontend configura `API_URL` con la URL interna que Coolify expone para este servicio, y conserva `ORIGIN` como su URL pública HTTPS.
+
+## Utilidad temporal para clonar datos de un usuario
+
+La imagen incluye el comando manual `gym-tracker-clone-user`. Copia ejercicios,
+rutinas y horario generando IDs nuevos y remapeando sus relaciones. No copia
+progreso (`sessions`), credenciales, rol, sesiones de autenticación, auditoría ni
+mutaciones offline. Por seguridad, se niega a ejecutarse si el usuario destino ya
+tiene progreso y restaura sus datos anteriores si el reemplazo falla.
+
+Desde la terminal del contenedor en Coolify:
+
+```bash
+gym-tracker-clone-user --source alexioficial --target juliux --confirm
+```
+
+El usuario destino debe existir previamente. El comando es reejecutable: cada
+ejecución reemplaza solamente sus ejercicios, rutinas y horario por una copia
+nueva de los datos actuales del origen. Después de usarlo y verificar el resultado,
+se puede eliminar `src/bin/clone-user-data.rs`, su `COPY` del Dockerfile y esta
+sección.
 
 ## Auditoría cifrada de requests
 

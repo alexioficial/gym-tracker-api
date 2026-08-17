@@ -2,12 +2,13 @@ use actix_web::{HttpResponse, web};
 use mongodb::Database;
 use serde_json::json;
 
-use crate::{config::Config, routes};
+use crate::{config::Config, rate_limit::RateLimiters, routes};
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
     pub config: Config,
+    pub rate_limits: RateLimiters,
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

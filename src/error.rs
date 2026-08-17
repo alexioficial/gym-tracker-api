@@ -1,4 +1,7 @@
-use actix_web::{HttpResponse, ResponseError, http::StatusCode};
+use actix_web::{
+    HttpResponse, ResponseError,
+    http::{StatusCode, header},
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -14,6 +17,8 @@ pub enum ApiError {
     Validation(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("Too many requests")]
+    RateLimited { retry_after: u64 },
     #[error("Internal server error")]
     Internal(#[from] mongodb::error::Error),
     #[error("Internal server error")]
@@ -33,13 +38,17 @@ impl ResponseError for ApiError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) | Self::Crypto => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(ErrorBody {
-            error: &self.to_string(),
-        })
+        let message = self.to_string();
+        let mut response = HttpResponse::build(self.status_code());
+        if let Self::RateLimited { retry_after } = self {
+            response.insert_header((header::RETRY_AFTER, retry_after.to_string()));
+        }
+        response.json(ErrorBody { error: &message })
     }
 }

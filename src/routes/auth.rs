@@ -10,6 +10,7 @@ use crate::{
     config::normalize_username,
     error::ApiError,
     models::{LoginInput, UserDoc, UserOut},
+    rate_limit,
     routes::shared::{require_same_origin, user},
 };
 
@@ -24,8 +25,13 @@ async fn login(
     state: web::Data<AppState>,
     input: web::Json<LoginInput>,
 ) -> Result<HttpResponse, ApiError> {
-    require_same_origin(&request, &state)?;
     let username = normalize_username(&input.username);
+    let client = rate_limit::login_key(&request, state.config.trust_proxy_headers, &username);
+    state
+        .rate_limits
+        .check_login(&client)
+        .map_err(|retry_after| ApiError::RateLimited { retry_after })?;
+    require_same_origin(&request, &state)?;
     let users = state.db.collection::<UserDoc>("users");
     let account = users.find_one(doc! { "username": username }).await?;
     let Some(account) = account else {
