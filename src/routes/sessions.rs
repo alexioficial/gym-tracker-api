@@ -65,12 +65,12 @@ pub(crate) async fn session_data(
     let exercise_ids = entries
         .iter()
         .map(|entry| entry.exercise_id)
-        .collect::<Vec<_>>();
+        .collect::<std::collections::HashSet<_>>();
     let owned_exercise_count = db
         .collection::<ExerciseDoc>("exercises")
-        .count_documents(doc! { "userId": user_id, "_id": { "$in": exercise_ids } })
+        .count_documents(doc! { "userId": user_id, "_id": { "$in": exercise_ids.iter().copied().collect::<Vec<_>>() } })
         .await?;
-    if owned_exercise_count != entries.len() as u64 {
+    if owned_exercise_count != exercise_ids.len() as u64 {
         return Err(ApiError::Validation(
             "A session can only contain your own exercises".to_owned(),
         ));
@@ -97,15 +97,9 @@ pub(crate) async fn session_data(
 }
 
 fn validate_entries(entries: &[SessionEntryInput]) -> Result<Vec<SessionEntryDoc>, ApiError> {
-    let mut seen = std::collections::HashSet::new();
     let mut result = Vec::with_capacity(entries.len());
     for entry in entries {
         let exercise_id = object_id(&entry.exercise_id)?;
-        if !seen.insert(exercise_id) {
-            return Err(ApiError::Validation(
-                "An exercise may appear only once in a session".to_owned(),
-            ));
-        }
         if entry.sets.is_empty() || entry.sets.len() > MAX_SETS_PER_ENTRY {
             return Err(ApiError::Validation(
                 "Each exercise needs valid sets".to_owned(),
@@ -206,4 +200,37 @@ async fn delete(
         return Err(ApiError::NotFound);
     }
     Ok(HttpResponse::NoContent().finish())
+}
+
+#[cfg(test)]
+mod duplicate_tests {
+    use super::validate_entries;
+    use crate::models::{SessionEntryInput, WorkoutSetInput};
+
+    #[test]
+    fn keeps_duplicate_session_entries_in_their_original_order() {
+        let id = "64b7abdecf2160b649ab6085".to_owned();
+        let result = validate_entries(&[
+            SessionEntryInput {
+                exercise_id: id.clone(),
+                sets: vec![WorkoutSetInput {
+                    weight: 100.0,
+                    reps: 5.0,
+                }],
+            },
+            SessionEntryInput {
+                exercise_id: id,
+                sets: vec![WorkoutSetInput {
+                    weight: 80.0,
+                    reps: 10.0,
+                }],
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].exercise_id, result[1].exercise_id);
+        assert_eq!(result[0].sets[0].weight, 100.0);
+        assert_eq!(result[1].sets[0].weight, 80.0);
+    }
 }

@@ -48,41 +48,42 @@ pub(crate) async fn owned_exercises(
     user_id: ObjectId,
     entries: &[RoutineExerciseInput],
 ) -> Result<Vec<RoutineExerciseDoc>, ApiError> {
+    let exercises = validate_exercises(entries)?;
+    if !exercises.is_empty() {
+        let ids = exercises
+            .iter()
+            .map(|entry| entry.exercise_id)
+            .collect::<std::collections::HashSet<_>>();
+        let count = db
+            .collection::<ExerciseDoc>("exercises")
+            .count_documents(doc! { "userId": user_id, "_id": { "$in": ids.iter().copied().collect::<Vec<_>>() } })
+            .await?;
+        if count != ids.len() as u64 {
+            return Err(ApiError::Validation(
+                "A routine can only contain your own exercises".to_owned(),
+            ));
+        }
+    }
+    Ok(exercises)
+}
+
+fn validate_exercises(
+    entries: &[RoutineExerciseInput],
+) -> Result<Vec<RoutineExerciseDoc>, ApiError> {
     if entries.len() > MAX_ROUTINE_EXERCISES {
         return Err(ApiError::Validation(
             "Too many exercises in a routine".to_owned(),
         ));
     }
-    let mut seen = std::collections::HashSet::new();
     let mut exercises = Vec::with_capacity(entries.len());
     for entry in entries {
         let exercise_id = object_id(&entry.exercise_id)?;
-        if !seen.insert(exercise_id) {
-            return Err(ApiError::Validation(
-                "An exercise may appear only once in a routine".to_owned(),
-            ));
-        }
         let sets = if entry.sets.is_finite() {
             entry.sets.round().clamp(1.0, 10.0) as i32
         } else {
             3
         };
         exercises.push(RoutineExerciseDoc { exercise_id, sets });
-    }
-    if !exercises.is_empty() {
-        let ids = exercises
-            .iter()
-            .map(|entry| entry.exercise_id)
-            .collect::<Vec<_>>();
-        let count = db
-            .collection::<ExerciseDoc>("exercises")
-            .count_documents(doc! { "userId": user_id, "_id": { "$in": ids } })
-            .await?;
-        if count != exercises.len() as u64 {
-            return Err(ApiError::Validation(
-                "A routine can only contain your own exercises".to_owned(),
-            ));
-        }
     }
     Ok(exercises)
 }
@@ -252,4 +253,31 @@ async fn set_schedule_day(
     *day_slot(&mut days, &path)? = routine_id;
     schedules.update_one(doc! { "userId": current.id }, doc! { "$set": { "days": to_bson(&days).map_err(|_| ApiError::Crypto)? }, "$setOnInsert": { "userId": current.id } }).upsert(true).await?;
     Ok(HttpResponse::NoContent().finish())
+}
+
+#[cfg(test)]
+mod duplicate_tests {
+    use super::validate_exercises;
+    use crate::models::RoutineExerciseInput;
+
+    #[test]
+    fn keeps_duplicate_exercises_in_their_original_order() {
+        let id = "64b7abdecf2160b649ab6085".to_owned();
+        let result = validate_exercises(&[
+            RoutineExerciseInput {
+                exercise_id: id.clone(),
+                sets: 2.0,
+            },
+            RoutineExerciseInput {
+                exercise_id: id,
+                sets: 4.0,
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].exercise_id, result[1].exercise_id);
+        assert_eq!(result[0].sets, 2);
+        assert_eq!(result[1].sets, 4);
+    }
 }
