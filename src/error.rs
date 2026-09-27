@@ -44,6 +44,9 @@ impl ResponseError for ApiError {
     }
 
     fn error_response(&self) -> HttpResponse {
+        if self.status_code().is_server_error() {
+            eprintln!("internal error: {self:?}");
+        }
         let message = self.to_string();
         let mut response = HttpResponse::build(self.status_code());
         if let Self::RateLimited { retry_after } = self {

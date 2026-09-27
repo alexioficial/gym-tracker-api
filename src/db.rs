@@ -4,17 +4,23 @@ use mongodb::{
     options::IndexOptions,
 };
 
+use futures::TryStreamExt;
+
 use crate::{
-    auth::{hash_password, revoke_user_sessions, verify_password},
+    auth::{hash_password, revoke_user_sessions, token_hash, verify_password},
     config::{Config, normalize_username},
     error::ApiError,
-    models::UserDoc,
+    models::{AuthSessionDoc, UserDoc},
 };
+
+/// Applied changes are kept long enough for any device to retry them.
+const SYNC_MUTATION_RETENTION_DAYS: u64 = 180;
 
 pub async fn connect(config: &Config) -> Result<Database, ApiError> {
     let client = Client::with_uri_str(&config.mongodb_uri).await?;
     let db = client.database(&config.mongodb_db);
     ensure_indexes(&db).await?;
+    hash_legacy_session_tokens(&db).await?;
     seed_admin(&db, config).await?;
     Ok(db)
 }
@@ -100,6 +106,42 @@ async fn ensure_indexes(db: &Database) -> Result<(), ApiError> {
     db.collection::<mongodb::bson::Document>("sync_mutations")
         .create_index(unique(doc! { "userId": 1, "mutationId": 1 }))
         .await?;
+    db.collection::<mongodb::bson::Document>("sync_mutations")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "createdAt": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .expire_after(Some(std::time::Duration::from_secs(
+                            SYNC_MUTATION_RETENTION_DAYS * 24 * 60 * 60,
+                        )))
+                        .build(),
+                )
+                .build(),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Older versions used the session token itself as the document id. Replacing
+/// each one with its digest keeps existing devices signed in.
+async fn hash_legacy_session_tokens(db: &Database) -> Result<(), ApiError> {
+    let sessions = db.collection::<AuthSessionDoc>("auth_sessions");
+    let legacy = sessions
+        .find(doc! { "tokenHashed": { "$ne": true } })
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?;
+    for session in legacy {
+        let hashed = AuthSessionDoc {
+            id: token_hash(&session.id),
+            token_hashed: true,
+            ..session.clone()
+        };
+        // A duplicate means a previous run inserted it before stopping.
+        let _ = sessions.insert_one(hashed).await;
+        sessions.delete_one(doc! { "_id": &session.id }).await?;
+    }
     Ok(())
 }
 

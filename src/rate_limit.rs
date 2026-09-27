@@ -19,10 +19,10 @@ use governor::{
     DefaultDirectRateLimiter, DefaultKeyedRateLimiter, Quota, RateLimiter,
     clock::{Clock, DefaultClock},
 };
+use mongodb::bson::{DateTime, Document, doc};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
-use crate::app::AppState;
+use crate::{app::AppState, auth::token_hash};
 
 const GLOBAL_REQUESTS_PER_MINUTE: u32 = 120;
 const LOGIN_ATTEMPTS_PER_MINUTE: u32 = 5;
@@ -47,14 +47,17 @@ impl RateLimiters {
         }
     }
 
-    pub fn check_global(&self, key: &str) -> Result<(), u64> {
+    pub fn check_total(&self) -> Result<(), u64> {
         self.clean_up_periodically();
         self.total.check().map_err(|denied| {
             denied
                 .wait_time_from(DefaultClock::default().now())
                 .as_secs()
                 .saturating_add(1)
-        })?;
+        })
+    }
+
+    pub fn check_client(&self, key: &str) -> Result<(), u64> {
         check(&self.global, key)
     }
 
@@ -102,16 +105,35 @@ pub fn login_key(
     )
 }
 
-fn service_request_key(request: &ServiceRequest, trust_proxy_headers: bool) -> String {
-    session_key(request.headers()).unwrap_or_else(|| {
-        format!(
-            "ip:{}",
-            client_key(request.headers(), request.peer_addr(), trust_proxy_headers)
+/// Signed-in users get their own bucket, because every web request reaches the
+/// API from the same SvelteKit server IP. The session must exist: otherwise
+/// random cookies would each get a fresh bucket and bypass the limit.
+async fn service_request_key(request: &ServiceRequest, state: &AppState) -> String {
+    if let Some(hash) = session_token_hash(request.headers()) {
+        let valid = state
+            .db
+            .collection::<Document>("auth_sessions")
+            .find_one(doc! { "_id": &hash, "expiresAt": { "$gt": DateTime::now() } })
+            .projection(doc! { "_id": 1 })
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if valid {
+            return format!("session:{hash}");
+        }
+    }
+    format!(
+        "ip:{}",
+        client_key(
+            request.headers(),
+            request.peer_addr(),
+            state.config.trust_proxy_headers
         )
-    })
+    )
 }
 
-fn session_key(headers: &HeaderMap) -> Option<String> {
+fn session_token_hash(headers: &HeaderMap) -> Option<String> {
     let token = headers
         .get(COOKIE)?
         .to_str()
@@ -122,10 +144,7 @@ fn session_key(headers: &HeaderMap) -> Option<String> {
     if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
-    Some(format!(
-        "session:{}",
-        hex::encode(Sha256::digest(token.as_bytes()))
-    ))
+    Some(token_hash(token))
 }
 
 fn client_key(
@@ -174,8 +193,15 @@ pub async fn enforce(
     let Some(state) = request.app_data::<web::Data<AppState>>().cloned() else {
         return Ok(next.call(request).await?.map_into_left_body());
     };
-    let key = service_request_key(&request, state.config.trust_proxy_headers);
-    if let Err(retry_after) = state.rate_limits.check_global(&key) {
+    // The instance-wide limit runs first so floods cannot turn into session lookups.
+    let checked = match state.rate_limits.check_total() {
+        Ok(()) => {
+            let key = service_request_key(&request, &state).await;
+            state.rate_limits.check_client(&key)
+        }
+        Err(retry_after) => Err(retry_after),
+    };
+    if let Err(retry_after) = checked {
         let response = HttpResponse::TooManyRequests()
             .insert_header((RETRY_AFTER, retry_after.to_string()))
             .json(json!({ "error": "Too many requests" }));

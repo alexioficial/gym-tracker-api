@@ -12,7 +12,7 @@ use crate::{
     models::{
         ExerciseDoc, ExerciseInput, ExerciseOut, RoutineDoc, RoutineInput, RoutineOut, ScheduleDoc,
         ScheduleInput, SessionDoc, SessionInput, SessionOut, SyncMutationDoc, SyncMutationInput,
-        SyncMutationResult, SyncRequest, SyncResponse, SyncSnapshot,
+        SyncMutationResult, SyncMutationStatus, SyncRequest, SyncResponse, SyncSnapshot,
     },
     routes::{
         routines::{day_slot, owned_exercises, valid_color},
@@ -120,12 +120,29 @@ fn mutation_target(mutation: &SyncMutationInput) -> Result<ObjectId, ApiError> {
         .and_then(object_id)
 }
 
-fn mutation_result(mutation: &SyncMutationInput) -> SyncMutationResult {
+fn mutation_result(mutation: &SyncMutationInput, error: Option<String>) -> SyncMutationResult {
     SyncMutationResult {
         mutation_id: mutation.mutation_id.clone(),
         entity: mutation.entity.clone(),
         operation: mutation.operation.clone(),
         entity_id: mutation.entity_id.clone(),
+        status: if error.is_some() {
+            SyncMutationStatus::Rejected
+        } else {
+            SyncMutationStatus::Applied
+        },
+        error,
+    }
+}
+
+/// Client errors are final: retrying the same change can never succeed, so it is
+/// reported as rejected instead of failing the whole batch and blocking the queue.
+fn rejection(error: ApiError) -> Result<String, ApiError> {
+    match error {
+        ApiError::NotFound => Ok("This item no longer exists".to_owned()),
+        ApiError::Validation(message) | ApiError::Conflict(message) => Ok(message),
+        ApiError::Forbidden => Ok("This change is not allowed".to_owned()),
+        other => Err(other),
     }
 }
 
@@ -135,7 +152,10 @@ async fn apply_once(
     mutation: &SyncMutationInput,
 ) -> Result<SyncMutationResult, ApiError> {
     if uuid::Uuid::parse_str(&mutation.mutation_id).is_err() {
-        return Err(ApiError::Validation("Invalid offline change id".to_owned()));
+        return Ok(mutation_result(
+            mutation,
+            Some("Invalid offline change id".to_owned()),
+        ));
     }
     let mutations = db.collection::<SyncMutationDoc>("sync_mutations");
     if let Some(previous) = mutations
@@ -145,8 +165,11 @@ async fn apply_once(
         return Ok(previous.result);
     }
 
-    apply(db, user_id, mutation).await?;
-    let result = mutation_result(mutation);
+    let error = match apply(db, user_id, mutation).await {
+        Ok(()) => None,
+        Err(error) => Some(rejection(error)?),
+    };
+    let result = mutation_result(mutation, error);
     let record = SyncMutationDoc {
         id: ObjectId::new(),
         user_id,

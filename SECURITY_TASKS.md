@@ -11,25 +11,18 @@ Auditoría base: 2026-08-08. El rate limit ya está implementado; los siguientes
 
 ## Confidencialidad y disponibilidad del registro de auditoría
 
-- [ ] Censurar contraseñas, `Cookie`, `Authorization` y `Set-Cookie` antes de guardar registros de auditoría.
-- [ ] Añadir `Cache-Control: no-store` a las respuestas de auditoría descifradas.
-- [ ] Imponer un límite pequeño al cuerpo de la petición antes de que el middleware de auditoría lo almacene o clone.
-- [ ] Guardar solamente una vista previa limitada del cuerpo, su longitud y su digest, en vez de copias Base64/UTF-8 sin límite.
 - [ ] Sustituir las escrituras de auditoría ilimitadas y desacopladas por una cola acotada con métricas observables de fallos.
 
 ## Autenticación y sesiones
 
-- [ ] Evitar diferencias temporales en el login verificando un hash Argon2 ficticio cuando el usuario no exista.
 - [ ] Aumentar el mínimo de las contraseñas de usuarios y administradores y rechazar contraseñas débiles o conocidas como comprometidas.
 - [ ] Añadir MFA o autenticación reforzada antes de mostrar registros de auditoría descifrados.
-- [ ] Reducir la duración actual de 365 días de las sesiones, limitar las sesiones simultáneas y ofrecer una operación para revocarlas todas.
-- [ ] Guardar hashes de los tokens de sesión en MongoDB en vez de tokens reutilizables en texto recuperable.
+- [ ] Limitar las sesiones simultáneas y ofrecer una operación para revocarlas todas.
 
 ## Transporte, criptografía y retención
 
 - [ ] Establecer TLS mínimo 1.2 o 1.3 en Cloudflare y habilitar HSTS.
 - [ ] Derivar claves independientes para AES e índices ciegos mediante HKDF y añadir versiones explícitas de claves para permitir rotaciones.
-- [ ] Añadir limpieza TTL para `sync_mutations` y borrar esos registros cuando se elimine un usuario.
 - [ ] Tratar `x-gym-client` y las IP reenviadas como metadatos forenses no confiables, salvo que hayan sido verificados por un proxy confiable.
 
 ## Garantías y cadena de suministro
@@ -42,3 +35,11 @@ Auditoría base: 2026-08-08. El rate limit ya está implementado; los siguientes
 ## Completado
 
 - [x] Añadir límites por cliente, por intento de login y por instancia, con respuestas `429` y `Retry-After`; las peticiones bloqueadas también quedan registradas por la auditoría existente.
+- [x] El límite por sesión solo se aplica a sesiones que existen en la base de datos; las cookies inventadas caen en el límite por IP.
+- [x] Auditoría: se censuran contraseñas, tokens, `Cookie`, `Authorization` y `Set-Cookie` (de las cookies queda una huella SHA-256 corta); del cuerpo se guarda una vista previa de 4.096 caracteres, su longitud y su SHA-256; los cuerpos de más de 2 MiB se rechazan con `413`.
+- [x] Las respuestas de auditoría descifradas llevan `Cache-Control: no-store`, y la web no guarda `/admin` en el service worker.
+- [x] El login verifica un hash Argon2 ficticio cuando el usuario no existe.
+- [x] Los tokens de sesión se guardan como SHA-256 (`tokenHashed: true`); las sesiones antiguas se migran al arrancar sin cerrar la sesión de nadie.
+- [x] Las sesiones caducan tras 60 días sin uso (antes, 365 días fijos); cada uso las renueva, como mucho una vez al día.
+- [x] `sync_mutations` tiene TTL de 180 días y se borra al eliminar un usuario.
+- [x] Los errores 500 se escriben en stderr (logs de Coolify).

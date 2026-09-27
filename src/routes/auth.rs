@@ -5,7 +5,7 @@ use crate::{
     app::AppState,
     auth::{
         create_session, destroy_session, expired_session_cookie, hash_password, public_user,
-        session_cookie, verify_password,
+        session_cookie, verify_dummy_password, verify_password,
     },
     config::normalize_username,
     error::ApiError,
@@ -35,6 +35,7 @@ async fn login(
     let users = state.db.collection::<UserDoc>("users");
     let account = users.find_one(doc! { "username": username }).await?;
     let Some(account) = account else {
+        verify_dummy_password(&input.password);
         return Err(ApiError::Unauthorized);
     };
     if !verify_password(&input.password, &account.password_hash)? {

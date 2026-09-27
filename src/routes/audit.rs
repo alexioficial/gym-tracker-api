@@ -1,4 +1,4 @@
-use actix_web::{HttpRequest, web};
+use actix_web::{HttpRequest, HttpResponse, http::header, web};
 use chrono::{DateTime as ChronoDateTime, NaiveDate, Utc};
 use futures::TryStreamExt;
 use mongodb::{
@@ -43,11 +43,18 @@ struct AuditListItem {
     duration_ms: u128,
 }
 
+/// Decrypted audit data must never be kept by browsers or intermediaries.
+fn private_json<T: Serialize>(value: T) -> HttpResponse {
+    HttpResponse::Ok()
+        .insert_header((header::CACHE_CONTROL, "no-store"))
+        .json(value)
+}
+
 async fn list(
     request: HttpRequest,
     state: web::Data<AppState>,
     query: web::Query<AuditQuery>,
-) -> Result<web::Json<Vec<AuditListItem>>, ApiError> {
+) -> Result<HttpResponse, ApiError> {
     admin(&request, &state).await?;
     let cipher = &state.config.audit_cipher;
     let mut filter = Document::new();
@@ -117,14 +124,14 @@ async fn list(
                 .ok_or(ApiError::Crypto)? as u128,
         });
     }
-    Ok(web::Json(result))
+    Ok(private_json(result))
 }
 
 async fn detail(
     request: HttpRequest,
     path: web::Path<String>,
     state: web::Data<AppState>,
-) -> Result<web::Json<serde_json::Value>, ApiError> {
+) -> Result<HttpResponse, ApiError> {
     admin(&request, &state).await?;
     let id = ObjectId::parse_str(path.into_inner())
         .map_err(|_| ApiError::Validation("Invalid audit record id".to_owned()))?;
@@ -134,7 +141,7 @@ async fn detail(
         .find_one(doc! { "_id": id })
         .await?
         .ok_or(ApiError::NotFound)?;
-    Ok(web::Json(
+    Ok(private_json(
         decrypt_document(&state.config.audit_cipher, &record).map_err(|_| ApiError::Crypto)?,
     ))
 }

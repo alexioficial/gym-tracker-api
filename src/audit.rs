@@ -17,13 +17,19 @@ use futures::StreamExt;
 use hmac::{Hmac, Mac};
 use mongodb::bson::{DateTime, Document, doc};
 use serde::Serialize;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::app::AppState;
 
 const COLLECTION: &str = "audit_logs";
 const AAD: &[u8] = b"gym-tracker.audit.v1";
+/// Matches the JSON extractor's default limit; anything larger is refused before
+/// it is buffered in memory.
+const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+const BODY_PREVIEW_CHARS: usize = 4_096;
+const REDACTED: &str = "[redacted]";
+const SECRET_HEADERS: [&str; 4] = ["authorization", "cookie", "proxy-authorization", "set-cookie"];
 type HmacSha256 = Hmac<Sha256>;
 
 /// Encryption material is never persisted in MongoDB.  The base64 key must decode
@@ -117,23 +123,26 @@ struct RequestAudit {
     client_kind: String,
     headers: Vec<HeaderAudit>,
     cookies: Vec<CookieAudit>,
-    body_base64: String,
-    body_utf8: Option<String>,
+    body_length: usize,
+    body_sha256: String,
+    /// Truncated, with password fields redacted. Absent for binary bodies.
+    body_preview: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HeaderAudit {
     name: String,
-    value_base64: String,
-    value_utf8: Option<String>,
+    value: Option<String>,
 }
 
+/// Cookie values are secrets; a short digest still lets requests from the same
+/// session be correlated.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CookieAudit {
     name: String,
-    value: String,
+    fingerprint: String,
 }
 
 #[derive(Serialize)]
@@ -181,10 +190,26 @@ pub async fn log_request(
 }
 
 async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, Error> {
+    let declared_length = request
+        .headers()
+        .get(actix_web::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if declared_length.is_some_and(|length| length > MAX_BODY_BYTES) {
+        return Err(actix_web::error::ErrorPayloadTooLarge(
+            "Request body is too large",
+        ));
+    }
     let mut payload = request.take_payload();
     let mut raw_body = Vec::new();
     while let Some(chunk) = payload.next().await {
-        raw_body.extend_from_slice(&chunk?);
+        let chunk = chunk?;
+        if raw_body.len() + chunk.len() > MAX_BODY_BYTES {
+            return Err(actix_web::error::ErrorPayloadTooLarge(
+                "Request body is too large",
+            ));
+        }
+        raw_body.extend_from_slice(&chunk);
     }
     request.set_payload(raw_body.clone().into());
 
@@ -206,7 +231,7 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
                 .iter()
                 .map(|cookie| CookieAudit {
                     name: cookie.name().to_owned(),
-                    value: cookie.value().to_owned(),
+                    fingerprint: hex::encode(&Sha256::digest(cookie.value().as_bytes())[..6]),
                 })
                 .collect()
         })
@@ -253,9 +278,38 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
         client_kind: client_kind.to_owned(),
         headers,
         cookies,
-        body_base64: BASE64.encode(&raw_body),
-        body_utf8: String::from_utf8(raw_body).ok(),
+        body_length: raw_body.len(),
+        body_sha256: hex::encode(Sha256::digest(&raw_body)),
+        body_preview: body_preview(&raw_body),
     })
+}
+
+fn body_preview(raw: &[u8]) -> Option<String> {
+    let text = match serde_json::from_slice::<serde_json::Value>(raw) {
+        Ok(mut value) => {
+            redact_secrets(&mut value);
+            value.to_string()
+        }
+        Err(_) => String::from_utf8(raw.to_vec()).ok()?,
+    };
+    Some(text.chars().take(BODY_PREVIEW_CHARS).collect())
+}
+
+fn redact_secrets(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, field) in fields.iter_mut() {
+                let key = key.to_ascii_lowercase();
+                if key.contains("password") || key.contains("token") || key.contains("secret") {
+                    *field = serde_json::Value::String(REDACTED.to_owned());
+                } else {
+                    redact_secrets(field);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(redact_secrets),
+        _ => {}
+    }
 }
 
 fn capture_headers<'a>(
@@ -269,8 +323,11 @@ fn capture_headers<'a>(
     headers
         .map(|(name, value)| HeaderAudit {
             name: name.to_string(),
-            value_base64: BASE64.encode(value.as_bytes()),
-            value_utf8: value.to_str().ok().map(str::to_owned),
+            value: if SECRET_HEADERS.contains(&name.as_str()) {
+                Some(REDACTED.to_owned())
+            } else {
+                value.to_str().ok().map(str::to_owned)
+            },
         })
         .collect()
 }
@@ -311,4 +368,25 @@ pub fn decrypt_document(
     let ciphertext = document.get_str("ciphertext").map_err(|_| ())?;
     let raw = cipher.decrypt(ciphertext)?;
     serde_json::from_slice(&raw).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{REDACTED, body_preview};
+
+    #[test]
+    fn redacts_passwords_in_json_bodies() {
+        let preview =
+            body_preview(br#"{"username":"alex","password":"hunter22","nested":[{"newPassword":"x"}]}"#)
+                .unwrap();
+        assert!(!preview.contains("hunter22"));
+        assert!(preview.contains("alex"));
+        assert_eq!(preview.matches(REDACTED).count(), 2);
+    }
+
+    #[test]
+    fn truncates_long_bodies() {
+        let body = "a".repeat(10_000);
+        assert_eq!(body_preview(body.as_bytes()).unwrap().len(), 4_096);
+    }
 }

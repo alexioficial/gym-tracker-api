@@ -26,6 +26,9 @@ pub struct AuthSessionDoc {
     pub expires_at: DateTime,
     #[serde(rename = "createdAt")]
     pub created_at: DateTime,
+    /// Distinguishes digests from tokens stored in plain text by older versions.
+    #[serde(rename = "tokenHashed", default)]
+    pub token_hashed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -343,6 +346,19 @@ pub struct SyncMutationResult {
     pub entity: String,
     pub operation: String,
     pub entity_id: Option<String>,
+    /// Results stored before per-change rejections existed were always applied.
+    #[serde(default)]
+    pub status: SyncMutationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncMutationStatus {
+    #[default]
+    Applied,
+    Rejected,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

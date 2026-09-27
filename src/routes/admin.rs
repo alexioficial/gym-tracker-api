@@ -135,6 +135,7 @@ async fn delete(
         "routines",
         "sessions",
         "schedule",
+        "sync_mutations",
     ] {
         state
             .db

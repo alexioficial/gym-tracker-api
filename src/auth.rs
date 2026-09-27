@@ -9,6 +9,7 @@ use mongodb::{
 };
 use password_hash::SaltString;
 use scrypt::{Params, scrypt};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
@@ -19,7 +20,13 @@ use crate::{
 };
 
 pub const SESSION_COOKIE: &str = "gym_session";
-pub const SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 365;
+/// Sessions expire after this much inactivity. Every use pushes the expiry back,
+/// so people who train regularly stay signed in.
+pub const SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 60;
+/// Renewing on every request would mean one write per request.
+const SESSION_RENEW_AFTER_SECONDS: i64 = 60 * 60 * 24;
+/// The cookie outlives the server-side session; the server decides validity.
+pub const SESSION_COOKIE_MAX_AGE_SECONDS: i64 = 60 * 60 * 24 * 365;
 
 pub fn hash_password(password: &str) -> Result<String, ApiError> {
     let salt = SaltString::encode_b64(Uuid::new_v4().as_bytes()).map_err(|_| ApiError::Crypto)?;
@@ -63,20 +70,38 @@ pub fn verify_password(password: &str, stored: &str) -> Result<bool, ApiError> {
         .is_ok())
 }
 
+/// Verifying against a throwaway hash keeps unknown usernames from answering
+/// faster than wrong passwords.
+pub fn verify_dummy_password(password: &str) {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let stored = DUMMY.get_or_init(|| hash_password("dummy-password").unwrap_or_default());
+    let _ = verify_password(password, stored);
+}
+
 pub fn password_is_valid(password: &str) -> bool {
     (6..=256).contains(&password.chars().count())
+}
+
+/// Only this digest is stored, so a database leak does not expose usable tokens.
+pub fn token_hash(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn session_expiry(now: DateTime) -> DateTime {
+    DateTime::from_millis(now.timestamp_millis() + SESSION_TTL_SECONDS * 1000)
 }
 
 pub async fn create_session(db: &Database, user_id: ObjectId) -> Result<String, ApiError> {
     let token = Uuid::new_v4().simple().to_string() + &Uuid::new_v4().simple().to_string();
     let now = DateTime::now();
-    let expires_at = DateTime::from_millis(now.timestamp_millis() + SESSION_TTL_SECONDS * 1000);
+    let expires_at = session_expiry(now);
     db.collection::<AuthSessionDoc>("auth_sessions")
         .insert_one(AuthSessionDoc {
-            id: token.clone(),
+            id: token_hash(&token),
             user_id,
             expires_at,
             created_at: now,
+            token_hashed: true,
         })
         .await?;
     Ok(token)
@@ -87,12 +112,25 @@ pub async fn current_user(request: &HttpRequest, db: &Database) -> Result<UserDo
         return Err(ApiError::Unauthorized);
     };
     let sessions = db.collection::<AuthSessionDoc>("auth_sessions");
-    let Some(session) = sessions.find_one(doc! { "_id": cookie.value() }).await? else {
+    let Some(session) = sessions
+        .find_one(doc! { "_id": token_hash(cookie.value()) })
+        .await?
+    else {
         return Err(ApiError::Unauthorized);
     };
-    if session.expires_at.timestamp_millis() <= DateTime::now().timestamp_millis() {
+    let now = DateTime::now();
+    let remaining_ms = session.expires_at.timestamp_millis() - now.timestamp_millis();
+    if remaining_ms <= 0 {
         sessions.delete_one(doc! { "_id": session.id }).await?;
         return Err(ApiError::Unauthorized);
+    }
+    if remaining_ms < (SESSION_TTL_SECONDS - SESSION_RENEW_AFTER_SECONDS) * 1000 {
+        sessions
+            .update_one(
+                doc! { "_id": &session.id },
+                doc! { "$set": { "expiresAt": session_expiry(now) } },
+            )
+            .await?;
     }
     db.collection::<UserDoc>("users")
         .find_one(doc! { "_id": session.user_id })
@@ -103,7 +141,7 @@ pub async fn current_user(request: &HttpRequest, db: &Database) -> Result<UserDo
 pub async fn destroy_session(request: &HttpRequest, db: &Database) -> Result<(), ApiError> {
     if let Some(cookie) = request.cookie(SESSION_COOKIE) {
         db.collection::<AuthSessionDoc>("auth_sessions")
-            .delete_one(doc! { "_id": cookie.value() })
+            .delete_one(doc! { "_id": token_hash(cookie.value()) })
             .await?;
     }
     Ok(())
@@ -115,7 +153,7 @@ pub fn session_cookie(token: String, config: &Config) -> Cookie<'static> {
         .http_only(true)
         .same_site(SameSite::Lax)
         .secure(config.session_cookie_secure)
-        .max_age(Duration::seconds(SESSION_TTL_SECONDS))
+        .max_age(Duration::seconds(SESSION_COOKIE_MAX_AGE_SECONDS))
         .finish()
 }
 
