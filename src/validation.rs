@@ -16,6 +16,9 @@ pub const ROUTINE_COLORS: [&str; 16] = [
     "#6366F1", "#3B82F6", "#0EA5E9", "#06B6D4", "#14B8A6", "#10B981", "#22C55E", "#84CC16",
 ];
 pub const ROUTINE_MAX: usize = 100;
+/// Weights are always stored in pounds; this only chooses how clients show them.
+pub const WEIGHT_UNITS: [&str; 2] = ["lb", "kg"];
+pub const DEFAULT_WEIGHT_UNIT: &str = "lb";
 const USERNAME_MAX: usize = 30;
 
 pub fn object_id(value: &str) -> Result<ObjectId, ApiError> {

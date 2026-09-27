@@ -10,10 +10,16 @@ pub struct UserDoc {
     pub password_hash: String,
     #[serde(rename = "isAdmin")]
     pub is_admin: bool,
+    #[serde(rename = "weightUnit", default = "default_weight_unit")]
+    pub weight_unit: String,
     #[serde(rename = "createdAt")]
     pub created_at: DateTime,
     #[serde(rename = "updatedAt")]
     pub updated_at: DateTime,
+}
+
+pub fn default_weight_unit() -> String {
+    crate::validation::DEFAULT_WEIGHT_UNIT.to_owned()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -130,6 +136,7 @@ pub struct UserOut {
     pub id: String,
     pub username: String,
     pub is_admin: bool,
+    pub weight_unit: String,
     pub created_at: Option<String>,
 }
 
@@ -139,6 +146,7 @@ impl From<&UserDoc> for UserOut {
             id: value.id.to_hex(),
             username: value.username.clone(),
             is_admin: value.is_admin,
+            weight_unit: value.weight_unit.clone(),
             created_at: Some(value.created_at.try_to_rfc3339_string().unwrap_or_default()),
         }
     }
@@ -387,6 +395,19 @@ pub struct SyncSnapshot {
     pub routines: Vec<RoutineOut>,
     pub sessions: Vec<SessionOut>,
     pub schedule: ScheduleDays,
+    pub settings: SettingsOut,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsOut {
+    pub weight_unit: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsInput {
+    pub weight_unit: String,
 }
 
 #[derive(Serialize)]

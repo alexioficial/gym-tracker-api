@@ -67,6 +67,7 @@ async fn create(
         username,
         password_hash: hash_password(&input.password)?,
         is_admin: false,
+        weight_unit: crate::models::default_weight_unit(),
         created_at: now,
         updated_at: now,
     };

@@ -11,7 +11,8 @@ use crate::{
     error::ApiError,
     models::{
         ExerciseDoc, ExerciseInput, ExerciseOut, RoutineDoc, RoutineInput, RoutineOut, ScheduleDoc,
-        ScheduleInput, SessionDoc, SessionInput, SessionOut, SyncMutationDoc, SyncMutationInput,
+        ScheduleInput, SessionDoc, SessionInput, SessionOut, SettingsInput, SettingsOut,
+        SyncMutationDoc, SyncMutationInput, UserDoc,
         SyncMutationResult, SyncMutationStatus, SyncRequest, SyncResponse, SyncSnapshot,
     },
     routes::{
@@ -19,7 +20,7 @@ use crate::{
         sessions::session_data,
         shared::{require_same_origin, user},
     },
-    validation::{EXERCISE_MAX, MUSCLE_GROUP_MAX, clean_notes, object_id, text},
+    validation::{EXERCISE_MAX, MUSCLE_GROUP_MAX, WEIGHT_UNITS, clean_notes, object_id, text},
 };
 
 const MAX_MUTATIONS_PER_REQUEST: usize = 100;
@@ -99,11 +100,18 @@ async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiE
         .await?
         .map(|item| item.days)
         .unwrap_or_default();
+    let weight_unit = db
+        .collection::<UserDoc>("users")
+        .find_one(doc! { "_id": user_id })
+        .await?
+        .map(|user| user.weight_unit)
+        .unwrap_or_else(crate::models::default_weight_unit);
     Ok(SyncSnapshot {
         exercises,
         routines,
         sessions,
         schedule,
+        settings: SettingsOut { weight_unit },
     })
 }
 
@@ -209,6 +217,7 @@ async fn apply(
         ("session", "update") => update_session(db, user_id, mutation).await,
         ("session", "delete") => delete_session(db, user_id, mutation).await,
         ("schedule", "set") => set_schedule(db, user_id, mutation).await,
+        ("settings", "set") => set_settings(db, user_id, mutation).await,
         _ => Err(ApiError::Validation(
             "Unsupported offline change".to_owned(),
         )),
@@ -499,6 +508,24 @@ async fn set_schedule(
             doc! { "$set": { "days": to_bson(&days).map_err(|_| ApiError::Crypto)? }, "$setOnInsert": { "userId": user_id } },
         )
         .upsert(true)
+        .await?;
+    Ok(())
+}
+
+async fn set_settings(
+    db: &Database,
+    user_id: ObjectId,
+    mutation: &SyncMutationInput,
+) -> Result<(), ApiError> {
+    let input: SettingsInput = decoded(mutation)?;
+    if !WEIGHT_UNITS.contains(&input.weight_unit.as_str()) {
+        return Err(ApiError::Validation("Invalid weight unit".to_owned()));
+    }
+    db.collection::<UserDoc>("users")
+        .update_one(
+            doc! { "_id": user_id },
+            doc! { "$set": { "weightUnit": input.weight_unit, "updatedAt": DateTime::now() } },
+        )
         .await?;
     Ok(())
 }

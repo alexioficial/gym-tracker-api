@@ -164,6 +164,7 @@ async fn seed_admin(db: &Database, config: &Config) -> Result<(), ApiError> {
                 username,
                 password_hash: hash_password(&config.admin_password)?,
                 is_admin: true,
+                weight_unit: crate::models::default_weight_unit(),
                 created_at: now,
                 updated_at: now,
             };
