@@ -60,7 +60,7 @@ pub(crate) async fn owned_exercises(
             .await?;
         if count != ids.len() as u64 {
             return Err(ApiError::Validation(
-                "A routine can only contain your own exercises".to_owned(),
+                "Una rutina solo puede tener tus propios ejercicios".to_owned(),
             ));
         }
     }
@@ -72,7 +72,7 @@ fn validate_exercises(
 ) -> Result<Vec<RoutineExerciseDoc>, ApiError> {
     if entries.len() > MAX_ROUTINE_EXERCISES {
         return Err(ApiError::Validation(
-            "Too many exercises in a routine".to_owned(),
+            "Demasiados ejercicios en la rutina".to_owned(),
         ));
     }
     let mut exercises = Vec::with_capacity(entries.len());
@@ -100,13 +100,13 @@ async fn create(
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
     if !valid_color(&input.color) {
-        return Err(ApiError::Validation("Invalid routine color".to_owned()));
+        return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
     let routines = state.db.collection::<RoutineDoc>("routines");
     let routine = RoutineDoc {
         id: ObjectId::new(),
         user_id: current.id,
-        name: text(&input.name, "routine name", ROUTINE_MAX, true)?,
+        name: text(&input.name, "nombre de la rutina", ROUTINE_MAX, true)?,
         color: input.color.clone(),
         order: routines
             .count_documents(doc! { "userId": current.id })
@@ -129,7 +129,7 @@ async fn update(
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
     if !valid_color(&input.color) {
-        return Err(ApiError::Validation("Invalid routine color".to_owned()));
+        return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
     let exercises = owned_exercises(&state.db, current.id, &input.exercises).await?;
     let result = state
@@ -137,7 +137,7 @@ async fn update(
         .collection::<RoutineDoc>("routines")
         .update_one(
             doc! { "_id": object_id(&path)?, "userId": current.id },
-            doc! { "$set": { "name": text(&input.name, "routine name", ROUTINE_MAX, true)?, "color": &input.color, "exercises": to_bson(&exercises).map_err(|_| ApiError::Crypto)?, "updatedAt": DateTime::now() }, "$unset": { "exerciseIds": "" } },
+            doc! { "$set": { "name": text(&input.name, "nombre de la rutina", ROUTINE_MAX, true)?, "color": &input.color, "exercises": to_bson(&exercises).map_err(|_| ApiError::Crypto)?, "updatedAt": DateTime::now() }, "$unset": { "exerciseIds": "" } },
         )
         .await?;
     if result.matched_count == 0 {
@@ -214,7 +214,7 @@ pub(crate) fn day_slot<'a>(
         "fri" => Ok(&mut days.fri),
         "sat" => Ok(&mut days.sat),
         "sun" => Ok(&mut days.sun),
-        _ => Err(ApiError::Validation("Invalid day".to_owned())),
+        _ => Err(ApiError::Validation("Día no válido".to_owned())),
     }
 }
 
@@ -237,7 +237,7 @@ async fn set_schedule_day(
                 .is_some();
             if !owned {
                 return Err(ApiError::Validation(
-                    "You can only schedule one of your own routines".to_owned(),
+                    "Solo puedes programar tus propias rutinas".to_owned(),
                 ));
             }
             Some(id.to_hex())

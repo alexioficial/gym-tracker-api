@@ -22,7 +22,7 @@ pub const DEFAULT_WEIGHT_UNIT: &str = "lb";
 const USERNAME_MAX: usize = 30;
 
 pub fn object_id(value: &str) -> Result<ObjectId, ApiError> {
-    ObjectId::parse_str(value).map_err(|_| ApiError::Validation("Invalid id".to_owned()))
+    ObjectId::parse_str(value).map_err(|_| ApiError::Validation("Id no válido".to_owned()))
 }
 
 pub fn valid_username(value: &str) -> bool {
@@ -37,7 +37,7 @@ pub fn text(value: &str, field: &str, max: usize, required: bool) -> Result<Stri
     let cleaned = value.trim();
     let length = cleaned.chars().count();
     if (required && length == 0) || length > max {
-        return Err(ApiError::Validation(format!("Invalid {field}")));
+        return Err(ApiError::Validation(format!("Revisa el campo «{field}»")));
     }
     Ok(cleaned.to_owned())
 }
@@ -53,7 +53,7 @@ pub fn valid_date(value: &str) -> bool {
 pub fn clean_notes(value: Option<String>) -> Result<Option<String>, ApiError> {
     match value {
         Some(value) => {
-            let value = text(&value, "notes", NOTES_MAX, false)?;
+            let value = text(&value, "notas", NOTES_MAX, false)?;
             Ok((!value.is_empty()).then_some(value))
         }
         None => Ok(None),

@@ -134,7 +134,7 @@ async fn detail(
 ) -> Result<HttpResponse, ApiError> {
     admin(&request, &state).await?;
     let id = ObjectId::parse_str(path.into_inner())
-        .map_err(|_| ApiError::Validation("Invalid audit record id".to_owned()))?;
+        .map_err(|_| ApiError::Validation("Id de registro de auditoría no válido".to_owned()))?;
     let record = state
         .db
         .collection::<Document>(COLLECTION)

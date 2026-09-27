@@ -46,8 +46,8 @@ async fn create(
     let exercise = ExerciseDoc {
         id: ObjectId::new(),
         user_id: current.id,
-        name: text(&input.name, "exercise name", EXERCISE_MAX, true)?,
-        muscle_group: text(&input.muscle_group, "muscle group", MUSCLE_GROUP_MAX, false)?,
+        name: text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?,
+        muscle_group: text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?,
         notes: clean_notes(input.notes.clone())?,
         created_at: now,
         updated_at: now,
@@ -73,7 +73,7 @@ async fn update(
         .collection::<ExerciseDoc>("exercises")
         .update_one(
             doc! { "_id": object_id(&path)?, "userId": current.id },
-            doc! { "$set": { "name": text(&input.name, "exercise name", EXERCISE_MAX, true)?, "muscleGroup": text(&input.muscle_group, "muscle group", MUSCLE_GROUP_MAX, false)?, "notes": clean_notes(input.notes.clone())?, "updatedAt": DateTime::now() } },
+            doc! { "$set": { "name": text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?, "muscleGroup": text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?, "notes": clean_notes(input.notes.clone())?, "updatedAt": DateTime::now() } },
         )
         .await?;
     if result.matched_count == 0 {

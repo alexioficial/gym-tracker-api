@@ -49,7 +49,7 @@ async fn sync(
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
     if body.mutations.len() > MAX_MUTATIONS_PER_REQUEST {
-        return Err(ApiError::Validation("Too many pending changes".to_owned()));
+        return Err(ApiError::Validation("Demasiados cambios pendientes".to_owned()));
     }
 
     let mut applied = Vec::with_capacity(body.mutations.len());
@@ -117,14 +117,14 @@ async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiE
 
 fn decoded<T: DeserializeOwned>(mutation: &SyncMutationInput) -> Result<T, ApiError> {
     serde_json::from_value(mutation.payload.clone())
-        .map_err(|_| ApiError::Validation("Invalid offline change".to_owned()))
+        .map_err(|_| ApiError::Validation("Cambio sin conexión no válido".to_owned()))
 }
 
 fn mutation_target(mutation: &SyncMutationInput) -> Result<ObjectId, ApiError> {
     mutation
         .entity_id
         .as_deref()
-        .ok_or_else(|| ApiError::Validation("Offline change is missing an id".to_owned()))
+        .ok_or_else(|| ApiError::Validation("Al cambio sin conexión le falta el id".to_owned()))
         .and_then(object_id)
 }
 
@@ -147,9 +147,9 @@ fn mutation_result(mutation: &SyncMutationInput, error: Option<String>) -> SyncM
 /// reported as rejected instead of failing the whole batch and blocking the queue.
 fn rejection(error: ApiError) -> Result<String, ApiError> {
     match error {
-        ApiError::NotFound => Ok("This item no longer exists".to_owned()),
+        ApiError::NotFound => Ok("Este elemento ya no existe".to_owned()),
         ApiError::Validation(message) | ApiError::Conflict(message) => Ok(message),
-        ApiError::Forbidden => Ok("This change is not allowed".to_owned()),
+        ApiError::Forbidden => Ok("Este cambio no está permitido".to_owned()),
         other => Err(other),
     }
 }
@@ -162,7 +162,7 @@ async fn apply_once(
     if uuid::Uuid::parse_str(&mutation.mutation_id).is_err() {
         return Ok(mutation_result(
             mutation,
-            Some("Invalid offline change id".to_owned()),
+            Some("Id de cambio sin conexión no válido".to_owned()),
         ));
     }
     let mutations = db.collection::<SyncMutationDoc>("sync_mutations");
@@ -195,7 +195,7 @@ async fn apply_once(
             return Ok(previous.result);
         }
         return Err(ApiError::Conflict(
-            "Could not save offline change".to_owned(),
+            "No se pudo guardar el cambio sin conexión".to_owned(),
         ));
     }
     Ok(result)
@@ -219,7 +219,7 @@ async fn apply(
         ("schedule", "set") => set_schedule(db, user_id, mutation).await,
         ("settings", "set") => set_settings(db, user_id, mutation).await,
         _ => Err(ApiError::Validation(
-            "Unsupported offline change".to_owned(),
+            "Cambio sin conexión no admitido".to_owned(),
         )),
     }
 }
@@ -238,7 +238,7 @@ async fn create_exercise(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Offline id collision".to_owned()))
+            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
         };
     }
     let input: ExerciseInput = decoded(mutation)?;
@@ -247,8 +247,8 @@ async fn create_exercise(
         .insert_one(ExerciseDoc {
             id,
             user_id,
-            name: text(&input.name, "exercise name", EXERCISE_MAX, true)?,
-            muscle_group: text(&input.muscle_group, "muscle group", MUSCLE_GROUP_MAX, false)?,
+            name: text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?,
+            muscle_group: text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?,
             notes: clean_notes(input.notes)?,
             created_at: now,
             updated_at: now,
@@ -268,7 +268,7 @@ async fn update_exercise(
         .collection::<ExerciseDoc>("exercises")
         .update_one(
             doc! { "_id": id, "userId": user_id },
-            doc! { "$set": { "name": text(&input.name, "exercise name", EXERCISE_MAX, true)?, "muscleGroup": text(&input.muscle_group, "muscle group", MUSCLE_GROUP_MAX, false)?, "notes": clean_notes(input.notes)?, "updatedAt": DateTime::now() } },
+            doc! { "$set": { "name": text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?, "muscleGroup": text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?, "notes": clean_notes(input.notes)?, "updatedAt": DateTime::now() } },
         )
         .await?;
     if result.matched_count == 0 {
@@ -316,12 +316,12 @@ async fn create_routine(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Offline id collision".to_owned()))
+            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
         };
     }
     let input: RoutineInput = decoded(mutation)?;
     if !valid_color(&input.color) {
-        return Err(ApiError::Validation("Invalid routine color".to_owned()));
+        return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
     let routines = db.collection::<RoutineDoc>("routines");
     let routine = RoutineDoc {
@@ -329,7 +329,7 @@ async fn create_routine(
         user_id,
         name: text(
             &input.name,
-            "routine name",
+            "nombre de la rutina",
             crate::validation::ROUTINE_MAX,
             true,
         )?,
@@ -352,14 +352,14 @@ async fn update_routine(
     let id = mutation_target(mutation)?;
     let input: RoutineInput = decoded(mutation)?;
     if !valid_color(&input.color) {
-        return Err(ApiError::Validation("Invalid routine color".to_owned()));
+        return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
     let exercises = owned_exercises(db, user_id, &input.exercises).await?;
     let result = db
         .collection::<RoutineDoc>("routines")
         .update_one(
             doc! { "_id": id, "userId": user_id },
-            doc! { "$set": { "name": text(&input.name, "routine name", crate::validation::ROUTINE_MAX, true)?, "color": input.color, "exercises": to_bson(&exercises).map_err(|_| ApiError::Crypto)?, "updatedAt": DateTime::now() }, "$unset": { "exerciseIds": "" } },
+            doc! { "$set": { "name": text(&input.name, "nombre de la rutina", crate::validation::ROUTINE_MAX, true)?, "color": input.color, "exercises": to_bson(&exercises).map_err(|_| ApiError::Crypto)?, "updatedAt": DateTime::now() }, "$unset": { "exerciseIds": "" } },
         )
         .await?;
     if result.matched_count == 0 {
@@ -417,7 +417,7 @@ async fn create_session(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Offline id collision".to_owned()))
+            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
         };
     }
     let input: SessionInput = decoded(mutation)?;
@@ -476,7 +476,7 @@ async fn set_schedule(
     let day = mutation
         .entity_id
         .as_deref()
-        .ok_or_else(|| ApiError::Validation("Offline change is missing a day".to_owned()))?;
+        .ok_or_else(|| ApiError::Validation("Al cambio sin conexión le falta el día".to_owned()))?;
     let input: ScheduleInput = decoded(mutation)?;
     let routine_id = match input.routine_id {
         Some(value) if !value.is_empty() => {
@@ -488,7 +488,7 @@ async fn set_schedule(
                 .is_some();
             if !owned {
                 return Err(ApiError::Validation(
-                    "You can only schedule one of your own routines".to_owned(),
+                    "Solo puedes programar tus propias rutinas".to_owned(),
                 ));
             }
             Some(id.to_hex())
@@ -519,7 +519,7 @@ async fn set_settings(
 ) -> Result<(), ApiError> {
     let input: SettingsInput = decoded(mutation)?;
     if !WEIGHT_UNITS.contains(&input.weight_unit.as_str()) {
-        return Err(ApiError::Validation("Invalid weight unit".to_owned()));
+        return Err(ApiError::Validation("Unidad de peso no válida".to_owned()));
     }
     db.collection::<UserDoc>("users")
         .update_one(

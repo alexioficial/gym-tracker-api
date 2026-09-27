@@ -52,12 +52,12 @@ pub(crate) async fn session_data(
 ) -> Result<(Option<ObjectId>, Option<String>, Vec<SessionEntryDoc>), ApiError> {
     if !valid_date(&input.date) {
         return Err(ApiError::Validation(
-            "Enter a valid session date".to_owned(),
+            "Introduce una fecha válida".to_owned(),
         ));
     }
     if input.entries.is_empty() || input.entries.len() > MAX_SESSION_ENTRIES {
         return Err(ApiError::Validation(
-            "Add at least one valid exercise with reps".to_owned(),
+            "Añade al menos un ejercicio con repeticiones".to_owned(),
         ));
     }
 
@@ -72,7 +72,7 @@ pub(crate) async fn session_data(
         .await?;
     if owned_exercise_count != exercise_ids.len() as u64 {
         return Err(ApiError::Validation(
-            "A session can only contain your own exercises".to_owned(),
+            "Una sesión solo puede tener tus propios ejercicios".to_owned(),
         ));
     }
 
@@ -86,7 +86,7 @@ pub(crate) async fn session_data(
                 .is_some();
             if !owned {
                 return Err(ApiError::Validation(
-                    "A session can only use one of your own routines".to_owned(),
+                    "Una sesión solo puede usar una de tus rutinas".to_owned(),
                 ));
             }
             Some(id)
@@ -102,7 +102,7 @@ fn validate_entries(entries: &[SessionEntryInput]) -> Result<Vec<SessionEntryDoc
         let exercise_id = object_id(&entry.exercise_id)?;
         if entry.sets.is_empty() || entry.sets.len() > MAX_SETS_PER_ENTRY {
             return Err(ApiError::Validation(
-                "Each exercise needs valid sets".to_owned(),
+                "Cada ejercicio necesita series válidas".to_owned(),
             ));
         }
         let sets = entry
@@ -115,7 +115,7 @@ fn validate_entries(entries: &[SessionEntryInput]) -> Result<Vec<SessionEntryDoc
                     || !(0.0..=MAX_REPS).contains(&set.reps)
                     || set.reps == 0.0
                 {
-                    return Err(ApiError::Validation("Invalid weight or reps".to_owned()));
+                    return Err(ApiError::Validation("Peso o repeticiones no válidos".to_owned()));
                 }
                 Ok(WorkoutSetDoc {
                     weight: round(set.weight, 2),

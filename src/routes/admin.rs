@@ -44,11 +44,11 @@ async fn create(
     admin(&request, &state).await?;
     let username = normalize_username(&input.username);
     if !valid_username(&username) {
-        return Err(ApiError::Validation("Invalid username".to_owned()));
+        return Err(ApiError::Validation("Usuario no válido".to_owned()));
     }
     if !password_is_valid(&input.password) {
         return Err(ApiError::Validation(
-            "Password must be at least 6 characters".to_owned(),
+            "La contraseña debe tener al menos 6 caracteres".to_owned(),
         ));
     }
     let users = state.db.collection::<UserDoc>("users");
@@ -58,7 +58,7 @@ async fn create(
         .is_some()
     {
         return Err(ApiError::Conflict(
-            "That username is already taken".to_owned(),
+            "Ese usuario ya existe".to_owned(),
         ));
     }
     let now = DateTime::now();
@@ -86,7 +86,7 @@ async fn reset_password(
     let id = object_id(&path)?;
     if !password_is_valid(&input.password) {
         return Err(ApiError::Validation(
-            "Password must be at least 6 characters".to_owned(),
+            "La contraseña debe tener al menos 6 caracteres".to_owned(),
         ));
     }
     let users = state.db.collection::<UserDoc>("users");
@@ -96,7 +96,7 @@ async fn reset_password(
         .ok_or(ApiError::NotFound)?;
     if target.is_admin {
         return Err(ApiError::Validation(
-            "The admin password is managed by ADMIN_PASSWORD".to_owned(),
+            "La contraseña del administrador se gestiona con ADMIN_PASSWORD".to_owned(),
         ));
     }
     users.update_one(doc! { "_id": id }, doc! { "$set": { "passwordHash": hash_password(&input.password)?, "updatedAt": DateTime::now() } }).await?;
@@ -114,7 +114,7 @@ async fn delete(
     let id = object_id(&path)?;
     if id == current.id {
         return Err(ApiError::Validation(
-            "You cannot delete yourself".to_owned(),
+            "No puedes borrarte a ti mismo".to_owned(),
         ));
     }
     let users = state.db.collection::<UserDoc>("users");
@@ -124,7 +124,7 @@ async fn delete(
         .ok_or(ApiError::NotFound)?;
     if target.is_admin {
         return Err(ApiError::Validation(
-            "You cannot delete an admin".to_owned(),
+            "No puedes borrar a un administrador".to_owned(),
         ));
     }
     users

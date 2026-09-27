@@ -7,21 +7,21 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
-    #[error("Authentication required")]
+    #[error("Tienes que iniciar sesión")]
     Unauthorized,
-    #[error("Admins only")]
+    #[error("Solo para administradores")]
     Forbidden,
-    #[error("Not found")]
+    #[error("No encontrado")]
     NotFound,
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]
     Conflict(String),
-    #[error("Too many requests")]
+    #[error("Demasiadas peticiones; espera un momento")]
     RateLimited { retry_after: u64 },
-    #[error("Internal server error")]
+    #[error("Error interno del servidor")]
     Internal(#[from] mongodb::error::Error),
-    #[error("Internal server error")]
+    #[error("Error interno del servidor")]
     Crypto,
 }
 

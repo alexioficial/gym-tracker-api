@@ -197,7 +197,7 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
         .and_then(|value| value.parse::<usize>().ok());
     if declared_length.is_some_and(|length| length > MAX_BODY_BYTES) {
         return Err(actix_web::error::ErrorPayloadTooLarge(
-            "Request body is too large",
+            "La petición es demasiado grande",
         ));
     }
     let mut payload = request.take_payload();
@@ -206,7 +206,7 @@ async fn capture_request(request: &mut ServiceRequest) -> Result<RequestAudit, E
         let chunk = chunk?;
         if raw_body.len() + chunk.len() > MAX_BODY_BYTES {
             return Err(actix_web::error::ErrorPayloadTooLarge(
-                "Request body is too large",
+                "La petición es demasiado grande",
             ));
         }
         raw_body.extend_from_slice(&chunk);

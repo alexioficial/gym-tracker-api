@@ -204,7 +204,7 @@ pub async fn enforce(
     if let Err(retry_after) = checked {
         let response = HttpResponse::TooManyRequests()
             .insert_header((RETRY_AFTER, retry_after.to_string()))
-            .json(json!({ "error": "Too many requests" }));
+            .json(json!({ "error": "Demasiadas peticiones; espera un momento" }));
         return Ok(request.into_response(response).map_into_right_body());
     }
     Ok(next.call(request).await?.map_into_left_body())
