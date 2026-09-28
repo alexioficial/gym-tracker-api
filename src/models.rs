@@ -282,8 +282,11 @@ pub struct CoachClientOut {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoachSyncResponse {
+    pub coach: CoachOut,
     /// Every enabled client with their full data, like `/api/sync` for one user.
     pub clients: Vec<CoachClientOut>,
+    /// Disabled clients, without their data.
+    pub disabled: Vec<ClientSummaryOut>,
     pub applied: Vec<SyncMutationResult>,
 }
 

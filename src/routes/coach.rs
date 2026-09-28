@@ -16,7 +16,8 @@ use crate::{
     error::ApiError,
     models::{
         ClientStatusInput, ClientSummaryOut, CoachClientOut, CoachClientsOut, CoachSyncResponse,
-        PasswordInput, ROLE_CLIENT, SyncMutationInput, SyncRequest, UserDoc, UserInput,
+        PasswordInput, ROLE_CLIENT, SyncMutationInput, SyncMutationResult, SyncRequest, UserDoc,
+        UserInput,
     },
     routes::{
         owner::coach_out,
@@ -169,6 +170,27 @@ async fn roster(db: &Database, clients: &[UserDoc]) -> Result<Vec<CoachClientOut
     Ok(out)
 }
 
+async fn sync_response(
+    db: &Database,
+    current: &UserDoc,
+    clients: &[UserDoc],
+    applied: Vec<SyncMutationResult>,
+) -> Result<web::Json<CoachSyncResponse>, ApiError> {
+    let disabled = db
+        .collection::<UserDoc>("users")
+        .find(doc! { "coachId": current.id, "role": ROLE_CLIENT, "disabled": true })
+        .sort(doc! { "username": 1 })
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?;
+    Ok(web::Json(CoachSyncResponse {
+        coach: coach_out(db, current).await?,
+        clients: roster(db, clients).await?,
+        disabled: summaries(db, &disabled).await?,
+        applied,
+    }))
+}
+
 /// Everything the coach needs offline: each enabled client's data.
 async fn get_sync(
     request: HttpRequest,
@@ -176,10 +198,7 @@ async fn get_sync(
 ) -> Result<web::Json<CoachSyncResponse>, ApiError> {
     let current = coach(&request, &state).await?;
     let clients = enabled_clients(&state.db, &current).await?;
-    Ok(web::Json(CoachSyncResponse {
-        clients: roster(&state.db, &clients).await?,
-        applied: vec![],
-    }))
+    sync_response(&state.db, &current, &clients, vec![]).await
 }
 
 /// Applies the coach's queued changes, each tagged with its `clientId`.
@@ -228,10 +247,7 @@ async fn sync(
             }
         });
     }
-    Ok(web::Json(CoachSyncResponse {
-        clients: roster(&state.db, &clients).await?,
-        applied,
-    }))
+    sync_response(&state.db, &current, &clients, applied).await
 }
 
 /// The coach's plan caps how many enabled clients they may have.
