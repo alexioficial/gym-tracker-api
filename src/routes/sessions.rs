@@ -145,6 +145,7 @@ async fn create(
         routine_id,
         notes,
         entries,
+        logged_by: None,
         created_at: DateTime::now(),
     };
     state
@@ -179,7 +180,7 @@ async fn update(
     require_same_origin(&request, &state)?;
     let current = writer(&request, &state).await?;
     let (routine_id, notes, entries) = session_data(&state.db, current.id, &input).await?;
-    let result = state.db.collection::<SessionDoc>("sessions").update_one(doc! { "_id": object_id(&path)?, "userId": current.id }, doc! { "$set": { "date": &input.date, "routineId": routine_id, "notes": notes, "entries": to_bson(&entries).map_err(|_| ApiError::Crypto)? } }).await?;
+    let result = state.db.collection::<SessionDoc>("sessions").update_one(doc! { "_id": object_id(&path)?, "userId": current.id, "loggedBy": null }, doc! { "$set": { "date": &input.date, "routineId": routine_id, "notes": notes, "entries": to_bson(&entries).map_err(|_| ApiError::Crypto)? } }).await?;
     if result.matched_count == 0 {
         return Err(ApiError::NotFound);
     }
@@ -196,7 +197,7 @@ async fn delete(
     let result = state
         .db
         .collection::<SessionDoc>("sessions")
-        .delete_one(doc! { "_id": object_id(&path)?, "userId": current.id })
+        .delete_one(doc! { "_id": object_id(&path)?, "userId": current.id, "loggedBy": null })
         .await?;
     if result.deleted_count == 0 {
         return Err(ApiError::NotFound);

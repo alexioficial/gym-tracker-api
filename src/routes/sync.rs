@@ -2,7 +2,7 @@ use actix_web::{HttpRequest, web};
 use futures::TryStreamExt;
 use mongodb::{
     Database,
-    bson::{DateTime, Document, doc, oid::ObjectId, to_bson},
+    bson::{Bson, DateTime, Document, doc, oid::ObjectId, to_bson},
 };
 use serde::de::DeserializeOwned;
 
@@ -66,7 +66,23 @@ async fn sync(
 
     let mut applied = Vec::with_capacity(body.mutations.len());
     for mutation in &body.mutations {
-        applied.push(apply_once(&state.db, state.config.s3.as_ref(), current.id, mutation).await?);
+        applied.push(if mutation.client_id.is_some() {
+            mutation_result(
+                mutation,
+                Some(
+                    "Los cambios para clientes van por la sincronización del entrenador".to_owned(),
+                ),
+            )
+        } else {
+            apply_once(
+                &state.db,
+                state.config.s3.as_ref(),
+                current.id,
+                current.id,
+                mutation,
+            )
+            .await?
+        });
     }
 
     Ok(web::Json(SyncResponse {
@@ -157,7 +173,7 @@ fn mutation_target(mutation: &SyncMutationInput) -> Result<ObjectId, ApiError> {
         .and_then(object_id)
 }
 
-fn mutation_result(mutation: &SyncMutationInput, error: Option<String>) -> SyncMutationResult {
+pub fn mutation_result(mutation: &SyncMutationInput, error: Option<String>) -> SyncMutationResult {
     SyncMutationResult {
         mutation_id: mutation.mutation_id.clone(),
         entity: mutation.entity.clone(),
@@ -183,10 +199,13 @@ fn rejection(error: ApiError) -> Result<String, ApiError> {
     }
 }
 
-async fn apply_once(
+/// Applies a change to `user_id`'s data on behalf of `actor`: the user
+/// themselves, or their coach. Retries are recognised per actor.
+pub async fn apply_once(
     db: &Database,
     s3: Option<&S3Config>,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<SyncMutationResult, ApiError> {
     if uuid::Uuid::parse_str(&mutation.mutation_id).is_err() {
@@ -197,20 +216,20 @@ async fn apply_once(
     }
     let mutations = db.collection::<SyncMutationDoc>("sync_mutations");
     if let Some(previous) = mutations
-        .find_one(doc! { "userId": user_id, "mutationId": &mutation.mutation_id })
+        .find_one(doc! { "userId": actor, "mutationId": &mutation.mutation_id })
         .await?
     {
         return Ok(previous.result);
     }
 
-    let error = match apply(db, s3, user_id, mutation).await {
+    let error = match apply(db, s3, user_id, actor, mutation).await {
         Ok(()) => None,
         Err(error) => Some(rejection(error)?),
     };
     let result = mutation_result(mutation, error);
     let record = SyncMutationDoc {
         id: ObjectId::new(),
-        user_id,
+        user_id: actor,
         mutation_id: mutation.mutation_id.clone(),
         created_at: DateTime::now(),
         result: result.clone(),
@@ -219,7 +238,7 @@ async fn apply_once(
     if mutations.insert_one(record).await.is_err() {
         // Another retry may have completed while this request was running.
         if let Some(previous) = mutations
-            .find_one(doc! { "userId": user_id, "mutationId": &mutation.mutation_id })
+            .find_one(doc! { "userId": actor, "mutationId": &mutation.mutation_id })
             .await?
         {
             return Ok(previous.result);
@@ -235,6 +254,7 @@ async fn apply(
     db: &Database,
     s3: Option<&S3Config>,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     match (mutation.entity.as_str(), mutation.operation.as_str()) {
@@ -244,14 +264,14 @@ async fn apply(
         ("routine", "create") => create_routine(db, user_id, mutation).await,
         ("routine", "update") => update_routine(db, user_id, mutation).await,
         ("routine", "delete") => delete_routine(db, user_id, mutation).await,
-        ("session", "create") => create_session(db, user_id, mutation).await,
-        ("session", "update") => update_session(db, user_id, mutation).await,
-        ("session", "delete") => delete_session(db, user_id, mutation).await,
+        ("session", "create") => create_session(db, user_id, actor, mutation).await,
+        ("session", "update") => update_session(db, user_id, actor, mutation).await,
+        ("session", "delete") => delete_session(db, user_id, actor, mutation).await,
         ("schedule", "set") => set_schedule(db, user_id, mutation).await,
         ("settings", "set") => set_settings(db, user_id, mutation).await,
-        ("measurement", "create") => create_measurement(db, user_id, mutation).await,
-        ("measurement", "update") => update_measurement(db, s3, user_id, mutation).await,
-        ("measurement", "delete") => delete_measurement(db, s3, user_id, mutation).await,
+        ("measurement", "create") => create_measurement(db, user_id, actor, mutation).await,
+        ("measurement", "update") => update_measurement(db, s3, user_id, actor, mutation).await,
+        ("measurement", "delete") => delete_measurement(db, s3, user_id, actor, mutation).await,
         _ => Err(ApiError::Validation(
             "Cambio sin conexión no admitido".to_owned(),
         )),
@@ -446,9 +466,43 @@ async fn delete_routine(
     Ok(())
 }
 
+/// The author, when it is not the owner of the data.
+fn logged_by(user_id: ObjectId, actor: ObjectId) -> Option<ObjectId> {
+    (actor != user_id).then_some(actor)
+}
+
+/// A coach may change any record of their client; the client may change only
+/// the records they wrote themselves.
+fn editable(id: ObjectId, user_id: ObjectId, actor: ObjectId) -> Document {
+    let mut filter = doc! { "_id": id, "userId": user_id };
+    if actor == user_id {
+        filter.insert("loggedBy", Bson::Null);
+    }
+    filter
+}
+
+/// Why `editable` matched nothing: the record is the coach's, or it is gone.
+async fn not_editable(
+    db: &Database,
+    collection: &str,
+    id: ObjectId,
+    user_id: ObjectId,
+) -> ApiError {
+    match db
+        .collection::<Document>(collection)
+        .count_documents(doc! { "_id": id, "userId": user_id })
+        .await
+    {
+        Ok(0) => ApiError::NotFound,
+        Ok(_) => ApiError::Validation("Lo anotó tu entrenador; solo él puede cambiarlo".to_owned()),
+        Err(error) => error.into(),
+    }
+}
+
 async fn create_session(
     db: &Database,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     let id = mutation_target(mutation)?;
@@ -475,6 +529,7 @@ async fn create_session(
             routine_id,
             notes,
             entries,
+            logged_by: logged_by(user_id, actor),
             created_at: DateTime::now(),
         })
         .await?;
@@ -484,6 +539,7 @@ async fn create_session(
 async fn update_session(
     db: &Database,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     let id = mutation_target(mutation)?;
@@ -492,12 +548,12 @@ async fn update_session(
     let result = db
         .collection::<SessionDoc>("sessions")
         .update_one(
-            doc! { "_id": id, "userId": user_id },
+            editable(id, user_id, actor),
             doc! { "$set": { "date": input.date, "routineId": routine_id, "notes": notes, "entries": to_bson(&entries).map_err(|_| ApiError::Crypto)? } },
         )
         .await?;
     if result.matched_count == 0 {
-        return Err(ApiError::NotFound);
+        return Err(not_editable(db, "sessions", id, user_id).await);
     }
     Ok(())
 }
@@ -505,11 +561,21 @@ async fn update_session(
 async fn delete_session(
     db: &Database,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
-    db.collection::<SessionDoc>("sessions")
-        .delete_one(doc! { "_id": mutation_target(mutation)?, "userId": user_id })
+    let id = mutation_target(mutation)?;
+    let result = db
+        .collection::<SessionDoc>("sessions")
+        .delete_one(editable(id, user_id, actor))
         .await?;
+    if result.deleted_count == 0 {
+        // Deleting what is already gone is fine; deleting the coach's is not.
+        return match not_editable(db, "sessions", id, user_id).await {
+            ApiError::NotFound => Ok(()),
+            error => Err(error),
+        };
+    }
     Ok(())
 }
 
@@ -594,6 +660,7 @@ async fn set_settings(
 async fn create_measurement(
     db: &Database,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     let id = mutation_target(mutation)?;
@@ -620,7 +687,7 @@ async fn create_measurement(
             body_fat: data.body_fat,
             items: data.items,
             photos: data.photos,
-            logged_by: None,
+            logged_by: logged_by(user_id, actor),
             created_at: now,
             updated_at: now,
         })
@@ -632,6 +699,7 @@ async fn update_measurement(
     db: &Database,
     s3: Option<&S3Config>,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     let id = mutation_target(mutation)?;
@@ -640,7 +708,7 @@ async fn update_measurement(
     let measurements = db.collection::<MeasurementDoc>("measurements");
     let previous = measurements
         .find_one_and_update(
-            doc! { "_id": id, "userId": user_id },
+            editable(id, user_id, actor),
             doc! { "$set": {
                 "date": &data.date,
                 "bodyWeight": data.body_weight,
@@ -651,8 +719,10 @@ async fn update_measurement(
                 "updatedAt": DateTime::now(),
             } },
         )
-        .await?
-        .ok_or(ApiError::NotFound)?;
+        .await?;
+    let Some(previous) = previous else {
+        return Err(not_editable(db, "measurements", id, user_id).await);
+    };
     let removed = previous
         .photos
         .into_iter()
@@ -666,14 +736,23 @@ async fn delete_measurement(
     db: &Database,
     s3: Option<&S3Config>,
     user_id: ObjectId,
+    actor: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
-    if let Some(previous) = db
+    let id = mutation_target(mutation)?;
+    match db
         .collection::<MeasurementDoc>("measurements")
-        .find_one_and_delete(doc! { "_id": mutation_target(mutation)?, "userId": user_id })
+        .find_one_and_delete(editable(id, user_id, actor))
         .await?
     {
-        forget_photos(s3, previous.photos);
+        Some(previous) => forget_photos(s3, previous.photos),
+        None => {
+            if let error @ ApiError::Validation(_) =
+                not_editable(db, "measurements", id, user_id).await
+            {
+                return Err(error);
+            }
+        }
     }
     Ok(())
 }

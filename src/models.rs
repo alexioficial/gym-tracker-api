@@ -176,6 +176,9 @@ pub struct SessionDoc {
     pub notes: Option<String>,
     #[serde(default)]
     pub entries: Vec<SessionEntryDoc>,
+    /// Set when the user's coach logged it; the user can see it but not change it.
+    #[serde(rename = "loggedBy", default, skip_serializing_if = "Option::is_none")]
+    pub logged_by: Option<ObjectId>,
     #[serde(rename = "createdAt")]
     pub created_at: DateTime,
 }
@@ -448,6 +451,8 @@ pub struct SessionOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub entries: Vec<SessionEntryOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logged_by: Option<String>,
 }
 
 impl From<SessionDoc> for SessionOut {
@@ -458,6 +463,7 @@ impl From<SessionDoc> for SessionOut {
             created_at: value.created_at.timestamp_millis(),
             routine_id: value.routine_id.map(|id| id.to_hex()),
             notes: value.notes,
+            logged_by: value.logged_by.map(|id| id.to_hex()),
             entries: value
                 .entries
                 .into_iter()
@@ -551,6 +557,9 @@ pub struct SessionInput {
 #[serde(rename_all = "camelCase")]
 pub struct SyncMutationInput {
     pub mutation_id: String,
+    /// Coach sync only: whose data the change is for.
+    #[serde(default)]
+    pub client_id: Option<String>,
     pub entity: String,
     pub operation: String,
     pub entity_id: Option<String>,
