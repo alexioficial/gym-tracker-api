@@ -117,9 +117,11 @@ async fn delete(
             "No puedes borrar a un administrador".to_owned(),
         ));
     }
+    let photos = crate::routes::measurements::user_photo_keys(&state.db, id).await?;
     users
         .delete_one(doc! { "_id": id, "role": { "$ne": crate::models::ROLE_OWNER } })
         .await?;
+    crate::routes::measurements::forget_photos(state.config.s3.as_ref(), photos);
     if target.is_coach() {
         // Clients keep their data and go back to training on their own.
         users
@@ -141,6 +143,7 @@ async fn delete(
         "sessions",
         "schedule",
         "sync_mutations",
+        "measurements",
     ] {
         state
             .db

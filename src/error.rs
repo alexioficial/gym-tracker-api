@@ -19,6 +19,8 @@ pub enum ApiError {
     Conflict(String),
     #[error("{0}")]
     ReadOnly(String),
+    #[error("{0}")]
+    Unavailable(String),
     #[error("Demasiadas peticiones; espera un momento")]
     RateLimited { retry_after: u64 },
     #[error("Error interno del servidor")]
@@ -40,6 +42,7 @@ impl ResponseError for ApiError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) | Self::Crypto => StatusCode::INTERNAL_SERVER_ERROR,
         }

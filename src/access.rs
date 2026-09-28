@@ -1,5 +1,8 @@
 use chrono::{Days, Months, NaiveDate, Utc};
-use mongodb::{Database, bson::doc};
+use mongodb::{
+    Database,
+    bson::{doc, oid::ObjectId},
+};
 
 use crate::{error::ApiError, models::UserDoc};
 
@@ -107,6 +110,25 @@ pub async fn require_writable(db: &Database, user: &UserDoc) -> Result<(), ApiEr
         return Err(ApiError::ReadOnly(message.to_owned()));
     }
     Ok(())
+}
+
+/// A user sees their own data; a coach also sees that of their clients.
+pub async fn can_view_user(
+    db: &Database,
+    current: &UserDoc,
+    user_id: ObjectId,
+) -> Result<bool, ApiError> {
+    if current.id == user_id {
+        return Ok(true);
+    }
+    if !current.is_coach() {
+        return Ok(false);
+    }
+    Ok(db
+        .collection::<UserDoc>("users")
+        .count_documents(doc! { "_id": user_id, "coachId": current.id })
+        .await?
+        > 0)
 }
 
 #[cfg(test)]

@@ -19,6 +19,16 @@ pub const ROUTINE_MAX: usize = 100;
 /// Weights are always stored in pounds; this only chooses how clients show them.
 pub const WEIGHT_UNITS: [&str; 2] = ["lb", "kg"];
 pub const DEFAULT_WEIGHT_UNIT: &str = "lb";
+/// Lengths are always stored in centimetres.
+pub const LENGTH_UNITS: [&str; 2] = ["cm", "in"];
+pub const DEFAULT_LENGTH_UNIT: &str = "cm";
+pub const MEASUREMENT_ITEMS_MAX: usize = 30;
+pub const MEASUREMENT_NAME_MAX: usize = 60;
+/// Centimetres; also bounds height.
+pub const MAX_LENGTH_CM: f64 = 300.0;
+/// Pounds.
+pub const MAX_BODY_WEIGHT: f64 = 1_500.0;
+pub const MEASUREMENT_PHOTOS_MAX: usize = 6;
 const USERNAME_MAX: usize = 30;
 /// Coach plans; the web suggests a client limit for each one.
 pub const PLANS: [&str; 3] = ["basic", "pro", "unlimited"];

@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::audit::AuditCipher;
+use crate::{audit::AuditCipher, storage::S3Config};
 
 #[derive(Clone)]
 pub struct Config {
@@ -12,6 +12,8 @@ pub struct Config {
     pub session_cookie_secure: bool,
     pub trust_proxy_headers: bool,
     pub audit_cipher: AuditCipher,
+    /// Progress photos; `None` when the S3 variables are not set.
+    pub s3: Option<S3Config>,
 }
 
 impl Config {
@@ -47,6 +49,7 @@ impl Config {
                 .map(|value| value.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             audit_cipher: AuditCipher::from_base64(&audit_key)?,
+            s3: S3Config::from_env()?,
         })
     }
 }

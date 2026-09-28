@@ -2,6 +2,7 @@ mod admin;
 mod audit;
 mod auth;
 mod exercises;
+mod measurements;
 mod owner;
 mod routines;
 mod sessions;
@@ -18,5 +19,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .configure(sync::configure)
         .configure(admin::configure)
         .configure(owner::configure)
+        .configure(measurements::configure)
         .configure(audit::configure);
 }

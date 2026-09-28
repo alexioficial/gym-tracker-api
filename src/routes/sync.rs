@@ -11,17 +11,21 @@ use crate::{
     app::AppState,
     error::ApiError,
     models::{
-        ExerciseDoc, ExerciseInput, ExerciseOut, RoutineDoc, RoutineInput, RoutineOut, ScheduleDoc,
-        ScheduleInput, SessionDoc, SessionInput, SessionOut, SettingsInput, SettingsOut,
-        SyncMutationDoc, SyncMutationInput, SyncMutationResult, SyncMutationStatus, SyncRequest,
-        SyncResponse, SyncSnapshot, UserDoc,
+        ExerciseDoc, ExerciseInput, ExerciseOut, MeasurementDoc, MeasurementInput, MeasurementOut,
+        RoutineDoc, RoutineInput, RoutineOut, ScheduleDoc, ScheduleInput, SessionDoc, SessionInput,
+        SessionOut, SettingsInput, SettingsOut, SyncMutationDoc, SyncMutationInput,
+        SyncMutationResult, SyncMutationStatus, SyncRequest, SyncResponse, SyncSnapshot, UserDoc,
     },
     routes::{
+        measurements::{forget_photos, measurement_data},
         routines::{day_slot, owned_exercises, valid_color},
         sessions::session_data,
         shared::{require_same_origin, user},
     },
-    validation::{EXERCISE_MAX, MUSCLE_GROUP_MAX, WEIGHT_UNITS, clean_notes, object_id, text},
+    storage::S3Config,
+    validation::{
+        EXERCISE_MAX, LENGTH_UNITS, MUSCLE_GROUP_MAX, WEIGHT_UNITS, clean_notes, object_id, text,
+    },
 };
 
 const MAX_MUTATIONS_PER_REQUEST: usize = 100;
@@ -62,7 +66,7 @@ async fn sync(
 
     let mut applied = Vec::with_capacity(body.mutations.len());
     for mutation in &body.mutations {
-        applied.push(apply_once(&state.db, current.id, mutation).await?);
+        applied.push(apply_once(&state.db, state.config.s3.as_ref(), current.id, mutation).await?);
     }
 
     Ok(web::Json(SyncResponse {
@@ -108,18 +112,35 @@ async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiE
         .await?
         .map(|item| item.days)
         .unwrap_or_default();
-    let weight_unit = db
+    let settings = db
         .collection::<UserDoc>("users")
         .find_one(doc! { "_id": user_id })
         .await?
-        .map(|user| user.weight_unit)
-        .unwrap_or_else(crate::models::default_weight_unit);
+        .map(|user| SettingsOut {
+            weight_unit: user.weight_unit,
+            length_unit: user.length_unit,
+        })
+        .unwrap_or_else(|| SettingsOut {
+            weight_unit: crate::models::default_weight_unit(),
+            length_unit: crate::models::default_length_unit(),
+        });
+    let measurements = db
+        .collection::<MeasurementDoc>("measurements")
+        .find(doc! { "userId": user_id })
+        .sort(doc! { "date": -1, "createdAt": -1 })
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?
+        .into_iter()
+        .map(MeasurementOut::from)
+        .collect();
     Ok(SyncSnapshot {
         exercises,
         routines,
         sessions,
         schedule,
-        settings: SettingsOut { weight_unit },
+        settings,
+        measurements,
     })
 }
 
@@ -164,6 +185,7 @@ fn rejection(error: ApiError) -> Result<String, ApiError> {
 
 async fn apply_once(
     db: &Database,
+    s3: Option<&S3Config>,
     user_id: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<SyncMutationResult, ApiError> {
@@ -181,7 +203,7 @@ async fn apply_once(
         return Ok(previous.result);
     }
 
-    let error = match apply(db, user_id, mutation).await {
+    let error = match apply(db, s3, user_id, mutation).await {
         Ok(()) => None,
         Err(error) => Some(rejection(error)?),
     };
@@ -211,6 +233,7 @@ async fn apply_once(
 
 async fn apply(
     db: &Database,
+    s3: Option<&S3Config>,
     user_id: ObjectId,
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
@@ -226,6 +249,9 @@ async fn apply(
         ("session", "delete") => delete_session(db, user_id, mutation).await,
         ("schedule", "set") => set_schedule(db, user_id, mutation).await,
         ("settings", "set") => set_settings(db, user_id, mutation).await,
+        ("measurement", "create") => create_measurement(db, user_id, mutation).await,
+        ("measurement", "update") => update_measurement(db, s3, user_id, mutation).await,
+        ("measurement", "delete") => delete_measurement(db, s3, user_id, mutation).await,
         _ => Err(ApiError::Validation(
             "Cambio sin conexión no admitido".to_owned(),
         )),
@@ -537,14 +563,117 @@ async fn set_settings(
     mutation: &SyncMutationInput,
 ) -> Result<(), ApiError> {
     let input: SettingsInput = decoded(mutation)?;
-    if !WEIGHT_UNITS.contains(&input.weight_unit.as_str()) {
-        return Err(ApiError::Validation("Unidad de peso no válida".to_owned()));
-    }
+    let change = match mutation.entity_id.as_deref() {
+        // Older clients sent the weight unit without naming the setting.
+        Some("weightUnit") | None => {
+            let unit = input.weight_unit.unwrap_or_default();
+            if !WEIGHT_UNITS.contains(&unit.as_str()) {
+                return Err(ApiError::Validation("Unidad de peso no válida".to_owned()));
+            }
+            doc! { "weightUnit": unit }
+        }
+        Some("lengthUnit") => {
+            let unit = input.length_unit.unwrap_or_default();
+            if !LENGTH_UNITS.contains(&unit.as_str()) {
+                return Err(ApiError::Validation(
+                    "Unidad de longitud no válida".to_owned(),
+                ));
+            }
+            doc! { "lengthUnit": unit }
+        }
+        Some(_) => return Err(ApiError::Validation("Ajuste no válido".to_owned())),
+    };
+    let mut set = change;
+    set.insert("updatedAt", DateTime::now());
     db.collection::<UserDoc>("users")
-        .update_one(
-            doc! { "_id": user_id },
-            doc! { "$set": { "weightUnit": input.weight_unit, "updatedAt": DateTime::now() } },
-        )
+        .update_one(doc! { "_id": user_id }, doc! { "$set": set })
         .await?;
+    Ok(())
+}
+
+async fn create_measurement(
+    db: &Database,
+    user_id: ObjectId,
+    mutation: &SyncMutationInput,
+) -> Result<(), ApiError> {
+    let id = mutation_target(mutation)?;
+    let measurements = db.collection::<MeasurementDoc>("measurements");
+    if let Some(existing) = measurements.find_one(doc! { "_id": id }).await? {
+        return if existing.user_id == user_id {
+            Ok(())
+        } else {
+            Err(ApiError::Conflict(
+                "Conflicto de id sin conexión".to_owned(),
+            ))
+        };
+    }
+    let input: MeasurementInput = decoded(mutation)?;
+    let data = measurement_data(user_id, &input)?;
+    let now = DateTime::now();
+    measurements
+        .insert_one(MeasurementDoc {
+            id,
+            user_id,
+            date: data.date,
+            body_weight: data.body_weight,
+            height: data.height,
+            body_fat: data.body_fat,
+            items: data.items,
+            photos: data.photos,
+            logged_by: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .await?;
+    Ok(())
+}
+
+async fn update_measurement(
+    db: &Database,
+    s3: Option<&S3Config>,
+    user_id: ObjectId,
+    mutation: &SyncMutationInput,
+) -> Result<(), ApiError> {
+    let id = mutation_target(mutation)?;
+    let input: MeasurementInput = decoded(mutation)?;
+    let data = measurement_data(user_id, &input)?;
+    let measurements = db.collection::<MeasurementDoc>("measurements");
+    let previous = measurements
+        .find_one_and_update(
+            doc! { "_id": id, "userId": user_id },
+            doc! { "$set": {
+                "date": &data.date,
+                "bodyWeight": data.body_weight,
+                "height": data.height,
+                "bodyFat": data.body_fat,
+                "items": to_bson(&data.items).map_err(|_| ApiError::Crypto)?,
+                "photos": &data.photos,
+                "updatedAt": DateTime::now(),
+            } },
+        )
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    let removed = previous
+        .photos
+        .into_iter()
+        .filter(|key| !data.photos.contains(key))
+        .collect();
+    forget_photos(s3, removed);
+    Ok(())
+}
+
+async fn delete_measurement(
+    db: &Database,
+    s3: Option<&S3Config>,
+    user_id: ObjectId,
+    mutation: &SyncMutationInput,
+) -> Result<(), ApiError> {
+    if let Some(previous) = db
+        .collection::<MeasurementDoc>("measurements")
+        .find_one_and_delete(doc! { "_id": mutation_target(mutation)?, "userId": user_id })
+        .await?
+    {
+        forget_photos(s3, previous.photos);
+    }
     Ok(())
 }

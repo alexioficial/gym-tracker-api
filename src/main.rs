@@ -8,6 +8,7 @@ mod error;
 mod models;
 mod rate_limit;
 mod routes;
+mod storage;
 mod validation;
 
 use actix_cors::Cors;

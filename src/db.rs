@@ -105,6 +105,13 @@ async fn ensure_indexes(db: &Database) -> Result<(), ApiError> {
     db.collection::<UserDoc>("users")
         .create_index(IndexModel::builder().keys(doc! { "coachId": 1 }).build())
         .await?;
+    db.collection::<mongodb::bson::Document>("measurements")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "userId": 1, "date": -1 })
+                .build(),
+        )
+        .await?;
     db.collection::<mongodb::bson::Document>("payments")
         .create_index(
             IndexModel::builder()

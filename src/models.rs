@@ -14,6 +14,9 @@ pub struct UserDoc {
     pub role: String,
     #[serde(rename = "weightUnit", default = "default_weight_unit")]
     pub weight_unit: String,
+    /// Body measurements are stored in centimetres; this only chooses the display.
+    #[serde(rename = "lengthUnit", default = "default_length_unit")]
+    pub length_unit: String,
     /// Clients only: the coach who manages them.
     #[serde(rename = "coachId", default, skip_serializing_if = "Option::is_none")]
     pub coach_id: Option<ObjectId>,
@@ -48,6 +51,7 @@ impl UserDoc {
             password_hash,
             role: role.to_owned(),
             weight_unit: default_weight_unit(),
+            length_unit: default_length_unit(),
             coach_id: None,
             plan: None,
             max_clients: None,
@@ -77,6 +81,10 @@ fn default_role() -> String {
 
 pub fn default_weight_unit() -> String {
     crate::validation::DEFAULT_WEIGHT_UNIT.to_owned()
+}
+
+pub fn default_length_unit() -> String {
+    crate::validation::DEFAULT_LENGTH_UNIT.to_owned()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -196,6 +204,7 @@ pub struct UserOut {
     pub is_admin: bool,
     pub role: String,
     pub weight_unit: String,
+    pub length_unit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coach_id: Option<String>,
     /// Set by `/auth/me`: writes are refused until the coach's payment is up to date.
@@ -211,6 +220,7 @@ impl From<&UserDoc> for UserOut {
             is_admin: value.is_owner(),
             role: value.role.clone(),
             weight_unit: value.weight_unit.clone(),
+            length_unit: value.length_unit.clone(),
             coach_id: value.coach_id.map(|id| id.to_hex()),
             read_only: false,
             created_at: Some(value.created_at.try_to_rfc3339_string().unwrap_or_default()),
@@ -557,18 +567,132 @@ pub struct SyncSnapshot {
     pub sessions: Vec<SessionOut>,
     pub schedule: ScheduleDays,
     pub settings: SettingsOut,
+    pub measurements: Vec<MeasurementOut>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsOut {
     pub weight_unit: String,
+    pub length_unit: String,
+}
+
+/// One setting per mutation; `entityId` names which.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsInput {
+    pub weight_unit: Option<String>,
+    pub length_unit: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MeasurementItemDoc {
+    pub name: String,
+    /// Centimetres.
+    pub value: f64,
+}
+
+/// A body check-in: any mix of weight, height, body fat, named measurements and photos.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MeasurementDoc {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    #[serde(rename = "userId")]
+    pub user_id: ObjectId,
+    pub date: String,
+    /// Pounds, like set weights.
+    #[serde(
+        rename = "bodyWeight",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub body_weight: Option<f64>,
+    /// Centimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// Percent.
+    #[serde(rename = "bodyFat", default, skip_serializing_if = "Option::is_none")]
+    pub body_fat: Option<f64>,
+    #[serde(default)]
+    pub items: Vec<MeasurementItemDoc>,
+    /// Object keys in the photo bucket (`photos/<userId>/<uuid>.<ext>`).
+    #[serde(default)]
+    pub photos: Vec<String>,
+    /// Who wrote it, when it was not the user (their coach).
+    #[serde(rename = "loggedBy", default, skip_serializing_if = "Option::is_none")]
+    pub logged_by: Option<ObjectId>,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: DateTime,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeasurementOut {
+    pub id: String,
+    pub date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_fat: Option<f64>,
+    pub items: Vec<MeasurementItemDoc>,
+    pub photos: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logged_by: Option<String>,
+    pub created_at: i64,
+}
+
+impl From<MeasurementDoc> for MeasurementOut {
+    fn from(value: MeasurementDoc) -> Self {
+        Self {
+            id: value.id.to_hex(),
+            date: value.date,
+            body_weight: value.body_weight,
+            height: value.height,
+            body_fat: value.body_fat,
+            items: value.items,
+            photos: value.photos,
+            logged_by: value.logged_by.map(|id| id.to_hex()),
+            created_at: value.created_at.timestamp_millis(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SettingsInput {
-    pub weight_unit: String,
+pub struct MeasurementItemInput {
+    pub name: String,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeasurementInput {
+    pub date: String,
+    pub body_weight: Option<f64>,
+    pub height: Option<f64>,
+    pub body_fat: Option<f64>,
+    #[serde(default)]
+    pub items: Vec<MeasurementItemInput>,
+    #[serde(default)]
+    pub photos: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoUploadInput {
+    pub content_type: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoUploadOut {
+    pub key: String,
+    pub upload_url: String,
+    pub content_type: String,
 }
 
 #[derive(Serialize)]
