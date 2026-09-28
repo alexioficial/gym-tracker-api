@@ -20,6 +20,12 @@ pub const ROUTINE_MAX: usize = 100;
 pub const WEIGHT_UNITS: [&str; 2] = ["lb", "kg"];
 pub const DEFAULT_WEIGHT_UNIT: &str = "lb";
 const USERNAME_MAX: usize = 30;
+/// Coach plans; the web suggests a client limit for each one.
+pub const PLANS: [&str; 3] = ["basic", "pro", "unlimited"];
+pub const MAX_CLIENTS: i32 = 1_000;
+pub const MAX_PAYMENT_AMOUNT: f64 = 10_000_000.0;
+pub const MAX_PAYMENT_MONTHS: i32 = 12;
+pub const PAYMENT_NOTE_MAX: usize = 500;
 
 pub fn object_id(value: &str) -> Result<ObjectId, ApiError> {
     ObjectId::parse_str(value).map_err(|_| ApiError::Validation("Id no válido".to_owned()))

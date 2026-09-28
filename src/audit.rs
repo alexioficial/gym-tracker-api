@@ -29,7 +29,12 @@ const AAD: &[u8] = b"gym-tracker.audit.v1";
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 const BODY_PREVIEW_CHARS: usize = 4_096;
 const REDACTED: &str = "[redacted]";
-const SECRET_HEADERS: [&str; 4] = ["authorization", "cookie", "proxy-authorization", "set-cookie"];
+const SECRET_HEADERS: [&str; 4] = [
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "set-cookie",
+];
 type HmacSha256 = Hmac<Sha256>;
 
 /// Encryption material is never persisted in MongoDB.  The base64 key must decode
@@ -376,9 +381,10 @@ mod tests {
 
     #[test]
     fn redacts_passwords_in_json_bodies() {
-        let preview =
-            body_preview(br#"{"username":"alex","password":"hunter22","nested":[{"newPassword":"x"}]}"#)
-                .unwrap();
+        let preview = body_preview(
+            br#"{"username":"alex","password":"hunter22","nested":[{"newPassword":"x"}]}"#,
+        )
+        .unwrap();
         assert!(!preview.contains("hunter22"));
         assert!(preview.contains("alex"));
         assert_eq!(preview.matches(REDACTED).count(), 2);

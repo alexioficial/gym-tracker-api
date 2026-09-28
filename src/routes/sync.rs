@@ -7,13 +7,14 @@ use mongodb::{
 use serde::de::DeserializeOwned;
 
 use crate::{
+    access::require_writable,
     app::AppState,
     error::ApiError,
     models::{
         ExerciseDoc, ExerciseInput, ExerciseOut, RoutineDoc, RoutineInput, RoutineOut, ScheduleDoc,
         ScheduleInput, SessionDoc, SessionInput, SessionOut, SettingsInput, SettingsOut,
-        SyncMutationDoc, SyncMutationInput, UserDoc,
-        SyncMutationResult, SyncMutationStatus, SyncRequest, SyncResponse, SyncSnapshot,
+        SyncMutationDoc, SyncMutationInput, SyncMutationResult, SyncMutationStatus, SyncRequest,
+        SyncResponse, SyncSnapshot, UserDoc,
     },
     routes::{
         routines::{day_slot, owned_exercises, valid_color},
@@ -49,7 +50,14 @@ async fn sync(
     require_same_origin(&request, &state)?;
     let current = user(&request, &state).await?;
     if body.mutations.len() > MAX_MUTATIONS_PER_REQUEST {
-        return Err(ApiError::Validation("Demasiados cambios pendientes".to_owned()));
+        return Err(ApiError::Validation(
+            "Demasiados cambios pendientes".to_owned(),
+        ));
+    }
+    // Refusing the whole request keeps the changes queued on the device, so they
+    // upload once the payment is renewed instead of being dropped as rejected.
+    if !body.mutations.is_empty() {
+        require_writable(&state.db, &current).await?;
     }
 
     let mut applied = Vec::with_capacity(body.mutations.len());
@@ -238,7 +246,9 @@ async fn create_exercise(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
+            Err(ApiError::Conflict(
+                "Conflicto de id sin conexión".to_owned(),
+            ))
         };
     }
     let input: ExerciseInput = decoded(mutation)?;
@@ -248,7 +258,12 @@ async fn create_exercise(
             id,
             user_id,
             name: text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?,
-            muscle_group: text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?,
+            muscle_group: text(
+                &input.muscle_group,
+                "grupo muscular",
+                MUSCLE_GROUP_MAX,
+                false,
+            )?,
             notes: clean_notes(input.notes)?,
             created_at: now,
             updated_at: now,
@@ -316,7 +331,9 @@ async fn create_routine(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
+            Err(ApiError::Conflict(
+                "Conflicto de id sin conexión".to_owned(),
+            ))
         };
     }
     let input: RoutineInput = decoded(mutation)?;
@@ -417,7 +434,9 @@ async fn create_session(
         return if existing.user_id == user_id {
             Ok(())
         } else {
-            Err(ApiError::Conflict("Conflicto de id sin conexión".to_owned()))
+            Err(ApiError::Conflict(
+                "Conflicto de id sin conexión".to_owned(),
+            ))
         };
     }
     let input: SessionInput = decoded(mutation)?;

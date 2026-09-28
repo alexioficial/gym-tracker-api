@@ -17,6 +17,8 @@ pub enum ApiError {
     Validation(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    ReadOnly(String),
     #[error("Demasiadas peticiones; espera un momento")]
     RateLimited { retry_after: u64 },
     #[error("Error interno del servidor")]
@@ -34,7 +36,7 @@ impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::Forbidden | Self::ReadOnly(_) => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,

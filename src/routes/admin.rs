@@ -1,13 +1,13 @@
 use actix_web::{HttpRequest, HttpResponse, web};
 use futures::TryStreamExt;
-use mongodb::bson::{DateTime, Document, doc, oid::ObjectId};
+use mongodb::bson::{DateTime, Document, doc};
 
 use crate::{
     app::AppState,
     auth::{hash_password, password_is_valid, revoke_user_sessions},
     config::normalize_username,
     error::ApiError,
-    models::{PasswordInput, UserDoc, UserInput, UserOut},
+    models::{PasswordInput, ROLE_CLIENT, UserDoc, UserInput, UserOut},
     routes::shared::{admin, require_same_origin},
     validation::{object_id, valid_username},
 };
@@ -28,7 +28,7 @@ async fn list(
         .db
         .collection::<UserDoc>("users")
         .find(doc! {})
-        .sort(doc! { "isAdmin": -1, "username": 1 })
+        .sort(doc! { "username": 1 })
         .await?
         .try_collect::<Vec<_>>()
         .await?;
@@ -57,20 +57,10 @@ async fn create(
         .await?
         .is_some()
     {
-        return Err(ApiError::Conflict(
-            "Ese usuario ya existe".to_owned(),
-        ));
+        return Err(ApiError::Conflict("Ese usuario ya existe".to_owned()));
     }
-    let now = DateTime::now();
-    let user = UserDoc {
-        id: ObjectId::new(),
-        username,
-        password_hash: hash_password(&input.password)?,
-        is_admin: false,
-        weight_unit: crate::models::default_weight_unit(),
-        created_at: now,
-        updated_at: now,
-    };
+    // Accounts made here train on their own; coaches are created from /owner.
+    let user = UserDoc::new(username, hash_password(&input.password)?, ROLE_CLIENT);
     users.insert_one(user.clone()).await?;
     Ok(web::Json(UserOut::from(&user)))
 }
@@ -94,7 +84,7 @@ async fn reset_password(
         .find_one(doc! { "_id": id })
         .await?
         .ok_or(ApiError::NotFound)?;
-    if target.is_admin {
+    if target.is_owner() {
         return Err(ApiError::Validation(
             "La contraseña del administrador se gestiona con ADMIN_PASSWORD".to_owned(),
         ));
@@ -122,14 +112,28 @@ async fn delete(
         .find_one(doc! { "_id": id })
         .await?
         .ok_or(ApiError::NotFound)?;
-    if target.is_admin {
+    if target.is_owner() {
         return Err(ApiError::Validation(
             "No puedes borrar a un administrador".to_owned(),
         ));
     }
     users
-        .delete_one(doc! { "_id": id, "isAdmin": { "$ne": true } })
+        .delete_one(doc! { "_id": id, "role": { "$ne": crate::models::ROLE_OWNER } })
         .await?;
+    if target.is_coach() {
+        // Clients keep their data and go back to training on their own.
+        users
+            .update_many(
+                doc! { "coachId": id },
+                doc! { "$unset": { "coachId": "" }, "$set": { "updatedAt": DateTime::now() } },
+            )
+            .await?;
+        state
+            .db
+            .collection::<Document>("payments")
+            .delete_many(doc! { "coachId": id })
+            .await?;
+    }
     for collection in [
         "auth_sessions",
         "exercises",

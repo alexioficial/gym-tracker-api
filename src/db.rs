@@ -1,6 +1,6 @@
 use mongodb::{
     Client, Database, IndexModel,
-    bson::{DateTime, doc, oid::ObjectId},
+    bson::{DateTime, doc},
     options::IndexOptions,
 };
 
@@ -10,7 +10,7 @@ use crate::{
     auth::{hash_password, revoke_user_sessions, token_hash, verify_password},
     config::{Config, normalize_username},
     error::ApiError,
-    models::{AuthSessionDoc, UserDoc},
+    models::{AuthSessionDoc, ROLE_CLIENT, ROLE_OWNER, UserDoc},
 };
 
 /// Applied changes are kept long enough for any device to retry them.
@@ -21,6 +21,7 @@ pub async fn connect(config: &Config) -> Result<Database, ApiError> {
     let db = client.database(&config.mongodb_db);
     ensure_indexes(&db).await?;
     hash_legacy_session_tokens(&db).await?;
+    migrate_roles(&db).await?;
     seed_admin(&db, config).await?;
     Ok(db)
 }
@@ -101,6 +102,16 @@ async fn ensure_indexes(db: &Database) -> Result<(), ApiError> {
     db.collection::<mongodb::bson::Document>("schedule")
         .create_index(unique(doc! { "userId": 1 }))
         .await?;
+    db.collection::<UserDoc>("users")
+        .create_index(IndexModel::builder().keys(doc! { "coachId": 1 }).build())
+        .await?;
+    db.collection::<mongodb::bson::Document>("payments")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "coachId": 1, "paidOn": -1 })
+                .build(),
+        )
+        .await?;
     // A device can safely retry an offline mutation after a network failure.
     // One mutation id may only be applied once per user.
     db.collection::<mongodb::bson::Document>("sync_mutations")
@@ -145,6 +156,21 @@ async fn hash_legacy_session_tokens(db: &Database) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Before roles existed, `isAdmin` marked the owner and everyone else trained
+/// on their own, which is what a client without a coach is.
+async fn migrate_roles(db: &Database) -> Result<(), ApiError> {
+    db.collection::<mongodb::bson::Document>("users")
+        .update_many(
+            doc! { "role": { "$exists": false } },
+            vec![
+                doc! { "$set": { "role": { "$cond": [{ "$eq": ["$isAdmin", true] }, ROLE_OWNER, ROLE_CLIENT] } } },
+                doc! { "$unset": "isAdmin" },
+            ],
+        )
+        .await?;
+    Ok(())
+}
+
 async fn seed_admin(db: &Database, config: &Config) -> Result<(), ApiError> {
     let users = db.collection::<UserDoc>("users");
     let username = normalize_username(&config.admin_username);
@@ -158,31 +184,23 @@ async fn seed_admin(db: &Database, config: &Config) -> Result<(), ApiError> {
             user
         }
         None => {
-            let now = DateTime::now();
-            let user = UserDoc {
-                id: ObjectId::new(),
-                username,
-                password_hash: hash_password(&config.admin_password)?,
-                is_admin: true,
-                weight_unit: crate::models::default_weight_unit(),
-                created_at: now,
-                updated_at: now,
-            };
+            let user = UserDoc::new(username, hash_password(&config.admin_password)?, ROLE_OWNER);
             users.insert_one(user.clone()).await?;
             user
         }
     };
 
+    // Only the account named by ADMIN_USERNAME is the owner. Coaches keep their role.
     users
         .update_one(
             doc! { "_id": admin.id },
-            doc! { "$set": { "isAdmin": true, "updatedAt": DateTime::now() } },
+            doc! { "$set": { "role": ROLE_OWNER, "updatedAt": DateTime::now() }, "$unset": { "coachId": "" } },
         )
         .await?;
     users
         .update_many(
-            doc! { "_id": { "$ne": admin.id }, "isAdmin": true },
-            doc! { "$set": { "isAdmin": false, "updatedAt": DateTime::now() } },
+            doc! { "_id": { "$ne": admin.id }, "role": ROLE_OWNER },
+            doc! { "$set": { "role": ROLE_CLIENT, "updatedAt": DateTime::now() } },
         )
         .await?;
 

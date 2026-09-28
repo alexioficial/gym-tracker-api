@@ -2,6 +2,7 @@ use actix_web::{HttpRequest, HttpResponse, web};
 use mongodb::bson::{DateTime, doc};
 
 use crate::{
+    access::is_read_only,
     app::AppState,
     auth::{
         create_session, destroy_session, expired_session_cookie, hash_password, public_user,
@@ -71,5 +72,8 @@ async fn me(
     request: HttpRequest,
     state: web::Data<AppState>,
 ) -> Result<web::Json<UserOut>, ApiError> {
-    Ok(web::Json(public_user(&user(&request, &state).await?)))
+    let current = user(&request, &state).await?;
+    let mut out = public_user(&current);
+    out.read_only = is_read_only(&state.db, &current).await?;
+    Ok(web::Json(out))
 }

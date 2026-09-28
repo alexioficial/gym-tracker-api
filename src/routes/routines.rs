@@ -12,7 +12,7 @@ use crate::{
         ExerciseDoc, RoutineDoc, RoutineExerciseDoc, RoutineExerciseInput, RoutineInput,
         RoutineOut, ScheduleDays, ScheduleDoc, ScheduleInput,
     },
-    routes::shared::{require_same_origin, user},
+    routes::shared::{require_same_origin, user, writer},
     validation::{MAX_ROUTINE_EXERCISES, ROUTINE_COLORS, ROUTINE_MAX, object_id, text},
 };
 
@@ -98,7 +98,7 @@ async fn create(
     input: web::Json<RoutineInput>,
 ) -> Result<web::Json<RoutineOut>, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     if !valid_color(&input.color) {
         return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
@@ -127,7 +127,7 @@ async fn update(
     input: web::Json<RoutineInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     if !valid_color(&input.color) {
         return Err(ApiError::Validation("Color de rutina no válido".to_owned()));
     }
@@ -152,7 +152,7 @@ async fn delete(
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let id = object_id(&path)?;
     let result = state
         .db
@@ -225,7 +225,7 @@ async fn set_schedule_day(
     input: web::Json<ScheduleInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let routine_id = match &input.routine_id {
         Some(value) if !value.is_empty() => {
             let id = object_id(value)?;

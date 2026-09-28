@@ -8,14 +8,71 @@ pub struct UserDoc {
     pub username: String,
     #[serde(rename = "passwordHash")]
     pub password_hash: String,
-    #[serde(rename = "isAdmin")]
-    pub is_admin: bool,
+    /// `owner`, `coach` or `client`. Documents from before roles existed are
+    /// migrated at startup (`db::migrate_roles`).
+    #[serde(default = "default_role")]
+    pub role: String,
     #[serde(rename = "weightUnit", default = "default_weight_unit")]
     pub weight_unit: String,
+    /// Clients only: the coach who manages them.
+    #[serde(rename = "coachId", default, skip_serializing_if = "Option::is_none")]
+    pub coach_id: Option<ObjectId>,
+    /// Coaches only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    /// Coaches only; `None` means no limit.
+    #[serde(
+        rename = "maxClients",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_clients: Option<i32>,
+    /// Coaches only: last day covered by a payment (`YYYY-MM-DD`).
+    #[serde(rename = "paidUntil", default, skip_serializing_if = "Option::is_none")]
+    pub paid_until: Option<String>,
+    /// Coaches only: set by the owner; makes the coach and their clients read-only.
+    #[serde(default)]
+    pub suspended: bool,
     #[serde(rename = "createdAt")]
     pub created_at: DateTime,
     #[serde(rename = "updatedAt")]
     pub updated_at: DateTime,
+}
+
+impl UserDoc {
+    pub fn new(username: String, password_hash: String, role: &str) -> Self {
+        let now = DateTime::now();
+        Self {
+            id: ObjectId::new(),
+            username,
+            password_hash,
+            role: role.to_owned(),
+            weight_unit: default_weight_unit(),
+            coach_id: None,
+            plan: None,
+            max_clients: None,
+            paid_until: None,
+            suspended: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn is_owner(&self) -> bool {
+        self.role == ROLE_OWNER
+    }
+
+    pub fn is_coach(&self) -> bool {
+        self.role == ROLE_COACH
+    }
+}
+
+pub const ROLE_OWNER: &str = "owner";
+pub const ROLE_COACH: &str = "coach";
+pub const ROLE_CLIENT: &str = "client";
+
+fn default_role() -> String {
+    ROLE_CLIENT.to_owned()
 }
 
 pub fn default_weight_unit() -> String {
@@ -135,8 +192,14 @@ pub struct ScheduleDays {
 pub struct UserOut {
     pub id: String,
     pub username: String,
+    /// Kept for clients that predate roles; true only for the owner.
     pub is_admin: bool,
+    pub role: String,
     pub weight_unit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coach_id: Option<String>,
+    /// Set by `/auth/me`: writes are refused until the coach's payment is up to date.
+    pub read_only: bool,
     pub created_at: Option<String>,
 }
 
@@ -145,11 +208,109 @@ impl From<&UserDoc> for UserOut {
         Self {
             id: value.id.to_hex(),
             username: value.username.clone(),
-            is_admin: value.is_admin,
+            is_admin: value.is_owner(),
+            role: value.role.clone(),
             weight_unit: value.weight_unit.clone(),
+            coach_id: value.coach_id.map(|id| id.to_hex()),
+            read_only: false,
             created_at: Some(value.created_at.try_to_rfc3339_string().unwrap_or_default()),
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachOut {
+    pub id: String,
+    pub username: String,
+    pub plan: Option<String>,
+    pub max_clients: Option<i32>,
+    pub paid_until: Option<String>,
+    pub suspended: bool,
+    /// `active`, `grace`, `readonly` or `suspended`.
+    pub status: String,
+    pub active_clients: u64,
+    pub created_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachInput {
+    pub username: String,
+    pub password: String,
+    pub plan: String,
+    pub max_clients: Option<i32>,
+    pub paid_until: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachUpdateInput {
+    pub plan: String,
+    pub max_clients: Option<i32>,
+    pub paid_until: String,
+    pub suspended: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PaymentDoc {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    #[serde(rename = "coachId")]
+    pub coach_id: ObjectId,
+    pub amount: f64,
+    pub months: i32,
+    /// Day the cash was received (`YYYY-MM-DD`).
+    #[serde(rename = "paidOn")]
+    pub paid_on: String,
+    #[serde(rename = "periodStart")]
+    pub period_start: String,
+    #[serde(rename = "periodEnd")]
+    pub period_end: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentOut {
+    pub id: String,
+    pub coach_id: String,
+    pub coach_username: String,
+    pub amount: f64,
+    pub months: i32,
+    pub paid_on: String,
+    pub period_start: String,
+    pub period_end: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl PaymentOut {
+    pub fn new(payment: PaymentDoc, coach_username: String) -> Self {
+        Self {
+            id: payment.id.to_hex(),
+            coach_id: payment.coach_id.to_hex(),
+            coach_username,
+            amount: payment.amount,
+            months: payment.months,
+            paid_on: payment.paid_on,
+            period_start: payment.period_start,
+            period_end: payment.period_end,
+            note: payment.note,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentInput {
+    pub amount: f64,
+    pub months: i32,
+    pub paid_on: String,
+    pub note: Option<String>,
 }
 
 #[derive(Serialize)]

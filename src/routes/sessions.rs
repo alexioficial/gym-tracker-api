@@ -12,7 +12,7 @@ use crate::{
         ExerciseDoc, RoutineDoc, SessionDoc, SessionEntryDoc, SessionEntryInput, SessionInput,
         SessionOut, WorkoutSetDoc,
     },
-    routes::shared::{require_same_origin, user},
+    routes::shared::{require_same_origin, user, writer},
     validation::{
         MAX_REPS, MAX_SESSION_ENTRIES, MAX_SETS_PER_ENTRY, MAX_WEIGHT, clean_notes, object_id,
         round, valid_date,
@@ -115,7 +115,9 @@ fn validate_entries(entries: &[SessionEntryInput]) -> Result<Vec<SessionEntryDoc
                     || !(0.0..=MAX_REPS).contains(&set.reps)
                     || set.reps == 0.0
                 {
-                    return Err(ApiError::Validation("Peso o repeticiones no válidos".to_owned()));
+                    return Err(ApiError::Validation(
+                        "Peso o repeticiones no válidos".to_owned(),
+                    ));
                 }
                 Ok(WorkoutSetDoc {
                     weight: round(set.weight, 2),
@@ -134,7 +136,7 @@ async fn create(
     input: web::Json<SessionInput>,
 ) -> Result<web::Json<SessionOut>, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let (routine_id, notes, entries) = session_data(&state.db, current.id, &input).await?;
     let session = SessionDoc {
         id: ObjectId::new(),
@@ -175,7 +177,7 @@ async fn update(
     input: web::Json<SessionInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let (routine_id, notes, entries) = session_data(&state.db, current.id, &input).await?;
     let result = state.db.collection::<SessionDoc>("sessions").update_one(doc! { "_id": object_id(&path)?, "userId": current.id }, doc! { "$set": { "date": &input.date, "routineId": routine_id, "notes": notes, "entries": to_bson(&entries).map_err(|_| ApiError::Crypto)? } }).await?;
     if result.matched_count == 0 {
@@ -190,7 +192,7 @@ async fn delete(
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let result = state
         .db
         .collection::<SessionDoc>("sessions")

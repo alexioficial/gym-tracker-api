@@ -6,7 +6,7 @@ use crate::{
     app::AppState,
     error::ApiError,
     models::{ExerciseDoc, ExerciseInput, ExerciseOut},
-    routes::shared::{require_same_origin, user},
+    routes::shared::{require_same_origin, user, writer},
     validation::{EXERCISE_MAX, MUSCLE_GROUP_MAX, clean_notes, object_id, text},
 };
 
@@ -41,13 +41,18 @@ async fn create(
     input: web::Json<ExerciseInput>,
 ) -> Result<web::Json<ExerciseOut>, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let now = DateTime::now();
     let exercise = ExerciseDoc {
         id: ObjectId::new(),
         user_id: current.id,
         name: text(&input.name, "nombre del ejercicio", EXERCISE_MAX, true)?,
-        muscle_group: text(&input.muscle_group, "grupo muscular", MUSCLE_GROUP_MAX, false)?,
+        muscle_group: text(
+            &input.muscle_group,
+            "grupo muscular",
+            MUSCLE_GROUP_MAX,
+            false,
+        )?,
         notes: clean_notes(input.notes.clone())?,
         created_at: now,
         updated_at: now,
@@ -67,7 +72,7 @@ async fn update(
     input: web::Json<ExerciseInput>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let result = state
         .db
         .collection::<ExerciseDoc>("exercises")
@@ -88,7 +93,7 @@ async fn delete(
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApiError> {
     require_same_origin(&request, &state)?;
-    let current = user(&request, &state).await?;
+    let current = writer(&request, &state).await?;
     let id = object_id(&path)?;
     let result = state
         .db
