@@ -42,6 +42,10 @@ async fn login(
     if !verify_password(&input.password, &account.password_hash)? {
         return Err(ApiError::Unauthorized);
     }
+    // Checked after the password so the message does not reveal the account.
+    if account.disabled {
+        return Err(ApiError::Disabled);
+    }
     // A successful login upgrades hashes created by the former Node backend.
     if account.password_hash.starts_with("scrypt$") {
         users

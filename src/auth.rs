@@ -132,10 +132,16 @@ pub async fn current_user(request: &HttpRequest, db: &Database) -> Result<UserDo
             )
             .await?;
     }
-    db.collection::<UserDoc>("users")
+    let user = db
+        .collection::<UserDoc>("users")
         .find_one(doc! { "_id": session.user_id })
         .await?
-        .ok_or(ApiError::Unauthorized)
+        .ok_or(ApiError::Unauthorized)?;
+    // Disabling revokes sessions; this covers a request racing with it.
+    if user.disabled {
+        return Err(ApiError::Unauthorized);
+    }
+    Ok(user)
 }
 
 pub async fn destroy_session(request: &HttpRequest, db: &Database) -> Result<(), ApiError> {

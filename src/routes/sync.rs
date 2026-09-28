@@ -75,7 +75,7 @@ async fn sync(
     }))
 }
 
-async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiError> {
+pub async fn snapshot(db: &Database, user_id: ObjectId) -> Result<SyncSnapshot, ApiError> {
     let exercises = db
         .collection::<ExerciseDoc>("exercises")
         .find(doc! { "userId": user_id })

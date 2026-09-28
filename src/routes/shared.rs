@@ -27,6 +27,15 @@ pub async fn writer(request: &HttpRequest, state: &AppState) -> Result<UserDoc, 
     Ok(user)
 }
 
+pub async fn coach(request: &HttpRequest, state: &AppState) -> Result<UserDoc, ApiError> {
+    let user = user(request, state).await?;
+    if user.is_coach() {
+        Ok(user)
+    } else {
+        Err(ApiError::Forbidden)
+    }
+}
+
 /// The owner runs the service: accounts, coaches and payments.
 pub async fn admin(request: &HttpRequest, state: &AppState) -> Result<UserDoc, ApiError> {
     let user = user(request, state).await?;

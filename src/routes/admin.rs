@@ -123,11 +123,12 @@ async fn delete(
         .await?;
     crate::routes::measurements::forget_photos(state.config.s3.as_ref(), photos);
     if target.is_coach() {
-        // Clients keep their data and go back to training on their own.
+        // Clients keep their data and go back to training on their own; nobody
+        // could re-enable one their coach had disabled, so they are enabled.
         users
             .update_many(
                 doc! { "coachId": id },
-                doc! { "$unset": { "coachId": "" }, "$set": { "updatedAt": DateTime::now() } },
+                doc! { "$unset": { "coachId": "" }, "$set": { "disabled": false, "updatedAt": DateTime::now() } },
             )
             .await?;
         state

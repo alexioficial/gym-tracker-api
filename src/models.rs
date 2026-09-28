@@ -36,6 +36,10 @@ pub struct UserDoc {
     /// Coaches only: set by the owner; makes the coach and their clients read-only.
     #[serde(default)]
     pub suspended: bool,
+    /// Clients only: turned off by their coach. They cannot sign in and do not
+    /// count towards the coach's limit; their data stays.
+    #[serde(default)]
+    pub disabled: bool,
     #[serde(rename = "createdAt")]
     pub created_at: DateTime,
     #[serde(rename = "updatedAt")]
@@ -57,6 +61,7 @@ impl UserDoc {
             max_clients: None,
             paid_until: None,
             suspended: false,
+            disabled: false,
             created_at: now,
             updated_at: now,
         }
@@ -241,6 +246,40 @@ pub struct CoachOut {
     pub status: String,
     pub active_clients: u64,
     pub created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientSummaryOut {
+    pub id: String,
+    pub username: String,
+    pub disabled: bool,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_session_date: Option<String>,
+    /// Session dates of the last few weeks, newest first; the browser works out
+    /// "this week" and "days without training" in local time.
+    pub recent_session_dates: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachClientsOut {
+    pub coach: CoachOut,
+    pub clients: Vec<ClientSummaryOut>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoachClientOut {
+    pub client: ClientSummaryOut,
+    pub snapshot: SyncSnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientStatusInput {
+    pub disabled: bool,
 }
 
 #[derive(Deserialize)]

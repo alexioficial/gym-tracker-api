@@ -35,10 +35,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .route("/owner/payments/{id}", web::get().to(payment));
 }
 
-async fn coach_out(db: &Database, coach: &UserDoc) -> Result<CoachOut, ApiError> {
+pub async fn coach_out(db: &Database, coach: &UserDoc) -> Result<CoachOut, ApiError> {
     let active_clients = db
         .collection::<UserDoc>("users")
-        .count_documents(doc! { "coachId": coach.id })
+        .count_documents(doc! { "coachId": coach.id, "disabled": { "$ne": true } })
         .await?;
     Ok(CoachOut {
         id: coach.id.to_hex(),
