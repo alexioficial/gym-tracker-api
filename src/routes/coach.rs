@@ -15,13 +15,13 @@ use crate::{
     config::normalize_username,
     error::ApiError,
     models::{
-        ClientStatusInput, ClientSummaryOut, CoachClientOut, CoachClientsOut, PasswordInput,
-        ROLE_CLIENT, UserDoc, UserInput,
+        ClientStatusInput, ClientSummaryOut, CoachClientOut, CoachClientsOut, CoachSyncResponse,
+        PasswordInput, ROLE_CLIENT, SyncMutationInput, SyncRequest, UserDoc, UserInput,
     },
     routes::{
         owner::coach_out,
         shared::{coach, require_same_origin},
-        sync::snapshot,
+        sync::{apply_once, mutation_result, snapshot},
     },
     validation::{object_id, valid_username},
 };
@@ -30,7 +30,9 @@ use crate::{
 const RECENT_DAYS: u64 = 35;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.route("/coach/clients", web::get().to(list))
+    cfg.route("/coach/sync", web::get().to(get_sync))
+        .route("/coach/sync", web::post().to(sync))
+        .route("/coach/clients", web::get().to(list))
         .route("/coach/clients", web::post().to(create))
         .route("/coach/clients/{id}", web::get().to(get))
         .route(
@@ -128,6 +130,107 @@ async fn get(
     Ok(web::Json(CoachClientOut {
         client: summary,
         snapshot: snapshot(&state.db, client.id).await?,
+    }))
+}
+
+const MAX_MUTATIONS_PER_REQUEST: usize = 100;
+
+/// What a coach may change in a client's data: their sessions and body
+/// records, and new exercises for the catalogue. Routines, schedule and
+/// settings stay the client's.
+fn coach_may(mutation: &SyncMutationInput) -> bool {
+    matches!(
+        (mutation.entity.as_str(), mutation.operation.as_str()),
+        ("session", "create" | "update" | "delete")
+            | ("measurement", "create" | "update" | "delete")
+            | ("exercise", "create")
+    )
+}
+
+async fn enabled_clients(db: &Database, coach: &UserDoc) -> Result<Vec<UserDoc>, ApiError> {
+    Ok(db
+        .collection::<UserDoc>("users")
+        .find(doc! { "coachId": coach.id, "role": ROLE_CLIENT, "disabled": { "$ne": true } })
+        .sort(doc! { "username": 1 })
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?)
+}
+
+async fn roster(db: &Database, clients: &[UserDoc]) -> Result<Vec<CoachClientOut>, ApiError> {
+    let summaries = summaries(db, clients).await?;
+    let mut out = Vec::with_capacity(clients.len());
+    for (client, summary) in clients.iter().zip(summaries) {
+        out.push(CoachClientOut {
+            client: summary,
+            snapshot: snapshot(db, client.id).await?,
+        });
+    }
+    Ok(out)
+}
+
+/// Everything the coach needs offline: each enabled client's data.
+async fn get_sync(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+) -> Result<web::Json<CoachSyncResponse>, ApiError> {
+    let current = coach(&request, &state).await?;
+    let clients = enabled_clients(&state.db, &current).await?;
+    Ok(web::Json(CoachSyncResponse {
+        clients: roster(&state.db, &clients).await?,
+        applied: vec![],
+    }))
+}
+
+/// Applies the coach's queued changes, each tagged with its `clientId`.
+async fn sync(
+    request: HttpRequest,
+    state: web::Data<AppState>,
+    body: web::Json<SyncRequest>,
+) -> Result<web::Json<CoachSyncResponse>, ApiError> {
+    require_same_origin(&request, &state)?;
+    let current = coach(&request, &state).await?;
+    if body.mutations.len() > MAX_MUTATIONS_PER_REQUEST {
+        return Err(ApiError::Validation(
+            "Demasiados cambios pendientes".to_owned(),
+        ));
+    }
+    // As in /api/sync: a coach behind on payments keeps the changes queued.
+    if !body.mutations.is_empty() {
+        require_writable(&state.db, &current).await?;
+    }
+    let clients = enabled_clients(&state.db, &current).await?;
+    let mut applied = Vec::with_capacity(body.mutations.len());
+    for mutation in &body.mutations {
+        let client = mutation
+            .client_id
+            .as_deref()
+            .and_then(|id| ObjectId::parse_str(id).ok())
+            .filter(|id| clients.iter().any(|client| client.id == *id));
+        applied.push(match client {
+            None => mutation_result(
+                mutation,
+                Some("Este cliente ya no está activo contigo".to_owned()),
+            ),
+            Some(_) if !coach_may(mutation) => mutation_result(
+                mutation,
+                Some("Ese cambio solo lo puede hacer el cliente".to_owned()),
+            ),
+            Some(client_id) => {
+                apply_once(
+                    &state.db,
+                    state.config.s3.as_ref(),
+                    client_id,
+                    current.id,
+                    mutation,
+                )
+                .await?
+            }
+        });
+    }
+    Ok(web::Json(CoachSyncResponse {
+        clients: roster(&state.db, &clients).await?,
+        applied,
     }))
 }
 
